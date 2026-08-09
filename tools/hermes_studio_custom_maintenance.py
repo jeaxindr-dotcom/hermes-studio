@@ -147,6 +147,55 @@ def wait_until_ready(timeout: float = 45.0) -> bool:
     return False
 
 
+def restore_main_window(log: Callable[[str], None] = print) -> bool:
+    """Bring the real Studio window back after a tray-style restart.
+
+    Electron can keep the main BrowserWindow hidden while its process and the
+    Pet window remain alive. This is not a renderer crash, but it looks like a
+    failed update to the user. Do not click or alter the Web UI; only restore
+    the native main window selected by its size/title.
+    """
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    candidates: list[tuple[int, int]] = []
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+    @callback_type
+    def callback(hwnd, _):
+        if not user32.IsWindow(hwnd):
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        try:
+            process = psutil.Process(pid.value)
+            if process.name().lower() != "hermes studio.exe":
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return True
+        title = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title, 256)
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
+        if width > 500 and height > 400:
+            candidates.append((width * height, hwnd))
+        return True
+
+    user32.EnumWindows(callback, 0)
+    if not candidates:
+        return False
+    _, hwnd = max(candidates)
+    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.SetForegroundWindow(hwnd)
+    log("Fenêtre principale Hermes Studio restaurée au premier plan.")
+    return True
+
+
 def backup_installed_dist(log: Callable[[str], None] = print) -> Path:
     validate_dist(INSTALL_DIST)
     WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -204,6 +253,7 @@ def install_dist(source_dist: Path, label: str, log: Callable[[str], None] = pri
             launch_studio(log)
             if not wait_until_ready():
                 raise RuntimeError("Le serveur Hermes Studio ne répond pas après l'installation.")
+            restore_main_window(log)
         except Exception:
             log("Échec : restauration automatique du bundle précédent.")
             try:
@@ -217,6 +267,7 @@ def install_dist(source_dist: Path, label: str, log: Callable[[str], None] = pri
                 launch_studio(log)
                 if not wait_until_ready(timeout=30):
                     log("Le serveur Hermes Studio ne répond pas après restauration.")
+                restore_main_window(log)
             except Exception as relaunch_error:
                 log(f"Relance après restauration impossible : {relaunch_error}")
             raise
@@ -230,6 +281,7 @@ def install_dist(source_dist: Path, label: str, log: Callable[[str], None] = pri
             if not studio_processes():
                 launch_studio(log)
                 wait_until_ready(timeout=30)
+                restore_main_window(log)
         except Exception as relaunch_error:
             log(f"Relance après échec de préparation impossible : {relaunch_error}")
         raise
