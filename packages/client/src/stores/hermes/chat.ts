@@ -14,6 +14,7 @@ import { showCompletionNotification } from '@/utils/completion-notification'
 import { detectThinkingBoundary } from '@/utils/thinking-parser'
 import { isKnownBridgeSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { responseErrorMessage } from '@/utils/http-error'
+import { deriveSessionStatus, type SessionStatus } from '@/utils/hermes/session-status'
 
 // Re-export ContentBlock for convenience
 export type ContentBlock = ContentBlockImport
@@ -1226,6 +1227,8 @@ export const useChatStore = defineStore('chat', () => {
   const pendingForkCommands = ref<Set<string>>(new Set())
   /** Sessions that completed while the user was viewing another session. */
   const completedUnreadSessions = ref<Set<string>>(new Set())
+  /** Sessions whose most recent runtime run failed. This is renderer state only. */
+  const sessionErrors = ref<Set<string>>(new Set())
   /** UI-only live streams for Hermes background subagents. Never sent into parent context. */
   const subagentStreams = ref<Map<string, SubagentStream>>(new Map())
   const storedSessionProfileFilter = getItemBestEffort(SESSION_PROFILE_FILTER_STORAGE_KEY)?.trim()
@@ -1338,6 +1341,7 @@ export const useChatStore = defineStore('chat', () => {
     runtimeMode.value = mode
     sessions.value = []
     completedUnreadSessions.value = new Set()
+    sessionErrors.value = new Set()
     queueLengths.value = new Map()
     queuedUserMessages.value = new Map()
     pendingApprovals.value = new Map()
@@ -1395,6 +1399,39 @@ export const useChatStore = defineStore('chat', () => {
 
   function isSessionLive(sessionId: string): boolean {
     return streamStates.value.has(sessionId) || serverWorking.value.has(sessionId)
+  }
+
+  function setSessionError(sessionId: string, hasError: boolean) {
+    const next = new Set(sessionErrors.value)
+    if (hasError) next.add(sessionId)
+    else next.delete(sessionId)
+    sessionErrors.value = next
+  }
+
+  function sessionHasLoadedError(session: Session): boolean {
+    const latestVisible = [...session.messages]
+      .reverse()
+      .find(message => message.role === 'assistant' || message.role === 'system')
+    if (!latestVisible) return false
+    return latestVisible.systemType === 'error'
+      || (latestVisible.role === 'system' && /^Error:/i.test(latestVisible.content.trim()))
+  }
+
+  function getSessionStatus(sessionId: string): SessionStatus {
+    const session = sessions.value.find(item => item.id === sessionId)
+    if (!session) return 'none'
+    const hasHistory = Math.max(
+      session.messages.length,
+      session.messageCount || 0,
+      session.messageTotal || 0,
+    ) > 0
+    return deriveSessionStatus({
+      hasHistory,
+      isWorking: isSessionLive(sessionId),
+      waitingForUser: pendingApprovals.value.has(sessionId) || pendingClarifies.value.has(sessionId),
+      hasUnreadReply: completedUnreadSessions.value.has(sessionId),
+      hasError: sessionErrors.value.has(sessionId) || sessionHasLoadedError(session),
+    })
   }
 
   function isSessionCompletedUnread(sessionId: string): boolean {
@@ -2499,6 +2536,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function addAgentErrorMessage(sessionId: string, error?: unknown) {
+    setSessionError(sessionId, true)
     const message = errorMessageText(error)
     const content = message ? `Error: ${message}` : 'Run failed'
     const msgs = getSessionMsgs(sessionId)
@@ -3078,6 +3116,7 @@ export const useChatStore = defineStore('chat', () => {
 
     // Capture session ID at send time — all callbacks use this, not activeSessionId
     const sid = activeSessionId.value!
+    setSessionError(sid, false)
     const shouldSendInitialSessionConfig = activeSession.value
       ? activeSession.value.messageCount == null || activeSession.value.messageCount === 0
       : false
@@ -3433,6 +3472,7 @@ export const useChatStore = defineStore('chat', () => {
           switch (evt.event) {
             case 'run.started':
               clearSessionCompletedUnread(sid)
+              setSessionError(sid, false)
               serverWorking.value.add(sid)
               clearAgentEventMessages(sid)
               setAbortState(sid, null)
@@ -3913,6 +3953,7 @@ export const useChatStore = defineStore('chat', () => {
                 !runHadToolActivity &&
                 finalOutputTrimmed === ''
               if (swallowedError) {
+                setSessionError(sid, true)
                 addMessage(sid, {
                   id: uid(),
                   role: 'system',
@@ -3920,6 +3961,7 @@ export const useChatStore = defineStore('chat', () => {
                   timestamp: Date.now(),
                 })
               } else {
+                setSessionError(sid, false)
                 playCompletionBellIfEnabled()
                 showCompletionNotificationIfEnabled(sid, completedAssistantMessageId)
               }
@@ -4046,6 +4088,7 @@ export const useChatStore = defineStore('chat', () => {
       if (!shouldQueue && !runSubmitted) {
         serverWorking.value.delete(sid)
       }
+      setSessionError(sid, true)
       addMessage(sid, {
         id: uid(),
         role: 'system',
@@ -4162,6 +4205,7 @@ export const useChatStore = defineStore('chat', () => {
 
         case 'run.started':
           clearSessionCompletedUnread(sid)
+          setSessionError(sid, false)
           serverWorking.value.add(sid)
           ensureAbortHandle()
           clearAgentEventMessages(sid)
@@ -4595,6 +4639,7 @@ export const useChatStore = defineStore('chat', () => {
           }
           const swallowedError = !runProducedAssistantText && !runHadToolActivity && finalOutputTrimmed === ''
           if (swallowedError) {
+            setSessionError(sid, true)
             addMessage(sid, {
               id: uid(),
               role: 'system',
@@ -4602,6 +4647,7 @@ export const useChatStore = defineStore('chat', () => {
               timestamp: Date.now(),
             })
           } else {
+            setSessionError(sid, false)
             playCompletionBellIfEnabled()
             showCompletionNotificationIfEnabled(sid, completedAssistantMessageId)
           }
@@ -4999,6 +5045,7 @@ export const useChatStore = defineStore('chat', () => {
     isForkPending,
     isRunActive,
     isSessionLive,
+    getSessionStatus,
     isSessionCompletedUnread,
     clearSessionCompletedUnread,
     sessionProfileFilter,

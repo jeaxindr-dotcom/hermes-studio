@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NTooltip, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
 import PageSidebarResizeHandle from '@/components/layout/PageSidebarResizeHandle.vue'
 import CodeExplorer from '@/components/hermes/code/CodeExplorer.vue'
@@ -23,6 +23,7 @@ const TERMINAL_MAX_HEIGHT = 620
 const TERMINAL_DEFAULT_HEIGHT = 280
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
@@ -37,6 +38,7 @@ const terminalHeight = ref(loadTerminalHeight())
 const resizingTerminal = ref(false)
 let resizeStart: { y: number; height: number } | null = null
 let workspacePromptOpen = false
+let lastRequestedFile = ''
 
 const activeSession = computed(() => chatStore.activeSession)
 const workspaceSessionId = computed(() => {
@@ -115,6 +117,30 @@ async function initializeWorkspace() {
     await chatStore.loadSessions(chatStore.sessionProfileFilter).catch(() => undefined)
   }
   await requestWorkspaceBinding()
+}
+
+function requestedFilePath(): string {
+  const value = route.query.openFile
+  const path = Array.isArray(value) ? value[0] : value
+  return typeof path === 'string' ? path.trim().replace(/\\/g, '/') : ''
+}
+
+async function openRequestedFile() {
+  const path = requestedFilePath()
+  if (!path || path === lastRequestedFile) return
+  lastRequestedFile = path
+  try {
+    await filesStore.openEditorTab(path, { profile: activeProfile.value })
+    // The query is a one-shot background command. Removing it keeps refreshes
+    // harmless while preserving the current Code route and active tab.
+    const nextQuery = { ...route.query }
+    delete nextQuery.openFile
+    await router.replace({ query: nextQuery })
+    lastRequestedFile = ''
+  } catch {
+    lastRequestedFile = ''
+    message.error(t('files.backendError'))
+  }
 }
 
 function openChat() {
@@ -213,10 +239,14 @@ watch(workspaceSessionId, () => {
   void requestWorkspaceBinding()
 })
 
+watch(() => route.query.openFile, () => {
+  void openRequestedFile()
+})
+
 onMounted(() => {
   appStore.setPageSidebarExpanded(true)
   document.title = `${t('code.title')} · Hermes Studio`
-  void initializeWorkspace()
+  void initializeWorkspace().then(openRequestedFile)
 })
 
 onBeforeUnmount(() => {

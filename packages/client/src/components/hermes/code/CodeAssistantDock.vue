@@ -8,6 +8,7 @@ import SessionListItem from '@/components/hermes/chat/SessionListItem.vue'
 import SubagentStreamPanel from '@/components/hermes/chat/SubagentStreamPanel.vue'
 import RealtimeVoiceStage from '@/components/hermes/chat/RealtimeVoiceStage.vue'
 import { useChatStore, type Session } from '@/stores/hermes/chat'
+import type { SessionStatus } from '@/utils/hermes/session-status'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { OPEN_SUBAGENT_STREAM_EVENT, type OpenSubagentStreamDetail } from '@/utils/hermes/subagent-stream'
@@ -89,6 +90,12 @@ const selectedSubagentStream = computed(() => {
   const selected = selectedSubagent.value
   return selected ? chatStore.getSubagentStream(selected.sessionId, selected.subagentId) : null
 })
+
+function sessionStatusFor(sessionId: string): SessionStatus {
+  return typeof chatStore.getSessionStatus === 'function'
+    ? chatStore.getSessionStatus(sessionId)
+    : 'none'
+}
 
 function loadWidth(): number {
   if (typeof localStorage === 'undefined') return DEFAULT_WIDTH
@@ -322,6 +329,7 @@ onBeforeUnmount(() => {
             :pinned="false"
             :can-delete="false"
             :streaming="chatStore.isSessionLive(session.id)"
+            :status="sessionStatusFor(session.id)"
             :completed-unread="chatStore.isSessionCompletedUnread(session.id)"
             :show-profile="true"
             @select="selectHistorySession(session)"

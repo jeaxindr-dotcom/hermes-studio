@@ -1,0 +1,145 @@
+name: Prepare Custom Upstream Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Upstream ref to merge"
+        required: false
+        default: main
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: custom-upstream-sync
+  cancel-in-progress: false
+
+env:
+  CUSTOM_BRANCH: feat/agents-tasks-code-workspace
+  UPSTREAM_REPOSITORY: https://github.com/EKKOLearnAI/hermes-studio.git
+
+jobs:
+  prepare:
+    name: Compare, merge, validate, and open candidate PR
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout custom branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CUSTOM_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Fetch upstream
+        shell: bash
+        env:
+          REQUESTED_UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'main' }}
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_REPOSITORY" 2>/dev/null || git remote set-url upstream "$UPSTREAM_REPOSITORY"
+          git fetch --no-tags upstream "$REQUESTED_UPSTREAM_REF"
+          echo "UPSTREAM_REF=upstream/$REQUESTED_UPSTREAM_REF" >> "$GITHUB_ENV"
+          echo "UPSTREAM_COMMIT=$(git rev-parse "upstream/$REQUESTED_UPSTREAM_REF")" >> "$GITHUB_ENV"
+
+      - name: Generate three-way update report
+        id: report
+        shell: bash
+        run: |
+          set +e
+          node scripts/custom-update-manager.mjs report \
+            --repo "$GITHUB_WORKSPACE" \
+            --ours "$CUSTOM_BRANCH" \
+            --theirs "$UPSTREAM_REF" \
+            --output "$RUNNER_TEMP/custom-update-report.json" \
+            > "$RUNNER_TEMP/custom-update-report.stdout.json"
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/custom-update-report.stdout.json"
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -ne 0 ]; then
+            echo "The three-way merge is not textually ready. No candidate will be published."
+            exit "$code"
+          fi
+
+      - name: Merge upstream into isolated runner checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge --no-ff --no-edit "$UPSTREAM_REF"
+          echo "CUSTOM_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "UPSTREAM_BASE=$(git merge-base HEAD "$UPSTREAM_REF")" >> "$GITHUB_ENV"
+
+      - name: Install and validate Web UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm rebuild node-pty
+          npm run build
+          npm run upstream:report -- --ours HEAD --theirs "$UPSTREAM_REF" --output "$RUNNER_TEMP/post-merge-report.json"
+          ./node_modules/.bin/vitest run \
+            tests/client/style-system.test.ts \
+            tests/client/session-activity-panel.test.ts \
+            tests/client/virtual-message-list-scroll.test.ts \
+            tests/client/code-workspace-source.test.ts \
+            tests/client/code-assistant-dock.test.ts \
+            tests/server/coding-agent-workspace-authorization.test.ts \
+            tests/server/session-activity-db.test.ts \
+            tests/server/terminal-cwd.test.ts \
+            tests/desktop/custom-update-manager.test.ts \
+            tests/desktop/custom-update-manifest.test.ts \
+            tests/desktop/customization-manifest.test.ts \
+            tests/desktop/updater.test.ts
+
+      - name: Install and validate Desktop main process
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix packages/desktop --include=dev --no-audit --no-fund
+          npm --prefix packages/desktop run build
+          HERMES_STUDIO_CUSTOM_COMMIT="$CUSTOM_COMMIT" \
+          HERMES_STUDIO_UPSTREAM_COMMIT="$UPSTREAM_COMMIT" \
+          HERMES_STUDIO_UPSTREAM_BASE="$UPSTREAM_BASE" \
+          npm --prefix packages/desktop run write:customization-manifest
+
+      - name: Upload merge report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-update-report-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/custom-update-report.json
+            ${{ runner.temp }}/custom-update-report.stdout.json
+            ${{ runner.temp }}/post-merge-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Create candidate branch and pull request
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          candidate="automation/upstream-sync-${GITHUB_RUN_ID}"
+          git switch -c "$candidate"
+          git add -A
+          git commit -m "chore: sync custom Studio fork with upstream" \
+            -m "Upstream commit: $UPSTREAM_COMMIT"
+          git push --set-upstream origin "$candidate"
+          gh pr create \
+            --base "$CUSTOM_BRANCH" \
+            --head "$candidate" \
+            --title "chore: sync Hermes Studio custom fork with upstream" \
+            --body "Automated three-way sync candidate. Textual merge, focused tests, Web UI build, Desktop typecheck, and custom manifest generation passed. Review semantic changes before merging."

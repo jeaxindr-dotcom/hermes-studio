@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isWindowsUpdaterLockError, pendingUpdateDirectories } from '../../packages/desktop/src/main/updater-helpers'
+
+function source(path: string): string {
+  return readFileSync(resolve(path), 'utf-8').replaceAll('\r', '')
+}
 
 describe('desktop updater helpers', () => {
   it('detects Squirrel locked-exe update failures', async () => {
@@ -11,20 +15,23 @@ describe('desktop updater helpers', () => {
   })
 
   it('includes local and roaming pending update cache directories', async () => {
+    const localRoot = 'C:\\Users\\A\\AppData\\Local'
+    const roamingRoot = 'C:\\Users\\A\\AppData\\Roaming'
     expect(pendingUpdateDirectories({
-      appDataPath: 'C:\\Users\\A\\AppData\\Roaming',
-      localAppData: 'C:\\Users\\A\\AppData\\Local',
+      appDataPath: roamingRoot,
+      localAppData: localRoot,
       appName: 'Hermes Studio',
     })).toEqual(expect.arrayContaining([
-      'C:\\Users\\A\\AppData\\Local/Hermes Studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Local/hermes-studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Roaming/hermes-studio-updater/pending',
+      join(localRoot, 'Hermes Studio-updater', 'pending'),
+      join(localRoot, 'hermes-studio-updater', 'pending'),
+      join(roamingRoot, 'hermes-studio-updater', 'pending'),
     ]))
   })
 
   it('checks on startup and from the tray without forcing an update', () => {
-    const updaterSource = readFileSync(resolve('packages/desktop/src/main/updater.ts'), 'utf-8')
-    const mainSource = readFileSync(resolve('packages/desktop/src/main/index.ts'), 'utf-8')
+    const updaterSource = source('packages/desktop/src/main/updater.ts')
+    const manifestSource = source('packages/desktop/src/main/custom-update-manifest.ts')
+    const mainSource = source('packages/desktop/src/main/index.ts')
 
     expect(mainSource).toContain('checkForDesktopUpdates(true)')
     expect(updaterSource).toContain('checkForDesktopUpdates(false)')
@@ -32,12 +39,16 @@ describe('desktop updater helpers', () => {
     expect(updaterSource).toContain('autoUpdater.autoInstallOnAppQuit = true')
     expect(updaterSource).toContain("buttons: [t('update.download'), t('update.later')]")
     expect(updaterSource).toContain('if (response === 0) {\n    await autoUpdater.downloadUpdate()')
+    expect(manifestSource).toContain('jeaxindr-dotcom/hermes-studio/releases/latest/download')
+    expect(manifestSource).toContain('customization-manifest.json')
+    expect(manifestSource).not.toContain('EKKOLearnAI/hermes-studio/releases/latest/download')
+    expect(manifestSource).not.toContain('download.ekkolearnai.com/latest')
     expect(updaterSource).not.toContain('setInterval(')
   })
 
   it('gracefully stops the current app before starting a downloaded update', () => {
-    const updaterSource = readFileSync(resolve('packages/desktop/src/main/updater.ts'), 'utf-8')
-    const mainSource = readFileSync(resolve('packages/desktop/src/main/index.ts'), 'utf-8')
+    const updaterSource = source('packages/desktop/src/main/updater.ts')
+    const mainSource = source('packages/desktop/src/main/index.ts')
 
     expect(mainSource).toContain('async function prepareAppShutdown(): Promise<void>')
     expect(mainSource).toContain('await stopWebUiServer().catch(() => undefined)')

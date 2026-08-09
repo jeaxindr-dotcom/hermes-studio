@@ -63,13 +63,59 @@ the native smoke checks after each rebase: Discussion Tasks/Sous-agents wheel,
 Group and Workflow wheel, sidebar drag/persistence, titlebar alignment, Code chat,
 Monaco, terminal authorization, and unsaved-tab protection.
 
-## Deploy and rollback
+When an upstream update is available, prepare it with the three-way report before
+changing the feature branch:
+
+```bash
+npm run upstream:report
+node scripts/custom-update-manager.mjs report \
+  --ours feat/agents-tasks-code-workspace \
+  --theirs upstream/main \
+  --output .hermes/upstream-report.json
+```
+
+The report distinguishes four separate outcomes:
+
+- `status: ready` means Git can materialize a textual merge;
+- `conflicts` lists real Git merge conflicts;
+- `semanticReview` lists updater/release files touched on both sides;
+- `safeToAutoApply` is true only when the checkout is clean, the merge is textually
+  clean, and no generated or release-sensitive files overlap.
+
+Never apply the report directly to the active checkout. Materialize a candidate in
+an isolated worktree, regenerate OpenAPI/lockfiles/dist, then run the focused tests,
+typechecks, build, and native smoke tests. A conflict or a failed semantic test
+blocks publication; resolve it in source and rerun the complete gate.
+
+The scheduled GitHub workflow `.github/workflows/custom-upstream-sync.yml` performs
+this comparison on a clean runner. A safe candidate becomes a pull request against
+the custom branch. A textual conflict produces an artifact report and no candidate
+release. The workflow never touches Hermes user data.
+
+Custom desktop releases include `customization-manifest.json` beside the normal
+Electron updater manifests. The packaged custom updater accepts only releases whose
+manifest pins the custom fork, the custom feed, `allowOfficialFallback: false`, and
+a full source commit. It never falls back to an official release feed.
 
 Build `dist/` from this checkout and replace only the installed web bundle using
 the maintained reversible deployment helper in the workspace. The helper stops
 Studio, stages the new bundle, validates it, renames the previous bundle, launches
 Studio, and waits for the backend health endpoint. Keep the archive created before
 the deployment.
+
+For a one-click Windows maintenance surface, run the generated helper from the
+fork checkout:
+
+```text
+tools/hermes_studio_custom_maintenance.py
+```
+
+It provides `Analyser upstream`, `Réappliquer le build custom`, and `Rollback
+dernier backup`. The equivalent non-GUI commands are `report`, `reapply`, and
+`rollback`. It only replaces `resources/webui/dist`, creates a dated ZIP before
+each replacement, and refuses an incomplete bundle. Build the optional standalone
+EXE with PyInstaller; keep that generated binary outside Git releases until the
+custom release workflow has been validated.
 
 If the build is bad, quit Studio and restore the archived `dist` directory. Do not
 restore or overwrite profile/session directories. After a successful deployment,

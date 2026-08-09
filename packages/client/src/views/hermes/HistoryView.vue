@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { type Session } from '@/stores/hermes/chat'
+import { type Session, useChatStore } from '@/stores/hermes/chat'
+import { deriveSessionStatus, type SessionStatus } from '@/utils/hermes/session-status'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSessionBrowserPrefsStore } from '@/stores/hermes/session-browser-prefs'
@@ -17,6 +18,7 @@ import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
 import { batchDeleteSessions, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/hermes/sessions'
 
 const appStore = useAppStore()
+const chatStore = useChatStore()
 const profilesStore = useProfilesStore()
 const sessionBrowserPrefsStore = useSessionBrowserPrefsStore()
 const message = useMessage()
@@ -110,6 +112,18 @@ watch(
 )
 let mobileQuery: MediaQueryList | null = null
 const isMobile = ref(false)
+
+function historySessionStatus(session: Pick<Session, 'id' | 'messageCount'>): SessionStatus {
+  const liveStatus = chatStore.getSessionStatus(session.id)
+  if (liveStatus !== 'none') return liveStatus
+  return deriveSessionStatus({
+    hasHistory: Number(session.messageCount || 0) > 0,
+    isWorking: false,
+    waitingForUser: false,
+    hasUnreadReply: false,
+    hasError: false,
+  })
+}
 
 function findHistorySession(sessionId: string): SessionSummary | undefined {
   return hermesSessions.value.find(session => session.id === sessionId)
@@ -919,6 +933,7 @@ function handleBatchDeleteConfirm() {
             :pinned="true"
             :can-delete="true"
             :streaming="false"
+            :status="historySessionStatus(s)"
             :selectable="isBatchMode"
             :selected="isSessionSelected(s)"
             :show-profile="true"
@@ -966,6 +981,7 @@ function handleBatchDeleteConfirm() {
               :pinned="false"
               :can-delete="true"
               :streaming="false"
+              :status="historySessionStatus(s)"
               :selectable="isBatchMode"
               :selected="isSessionSelected(s)"
               :show-profile="true"

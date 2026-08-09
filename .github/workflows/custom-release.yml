@@ -1,0 +1,116 @@
+name: Build Hermes Studio Custom Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Custom release tag, for example custom-v0.6.40"
+        required: true
+        type: string
+  push:
+    tags:
+      - "custom-v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: custom-release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CUSTOM_UPDATE_FEED_URL: https://github.com/jeaxindr-dotcom/hermes-studio/releases/latest/download
+  CUSTOM_BRANCH: feat/agents-tasks-code-workspace
+  UPSTREAM_REPOSITORY: https://github.com/EKKOLearnAI/hermes-studio.git
+
+jobs:
+  windows:
+    name: Hermes Studio Custom (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout custom source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/desktop/package-lock.json
+
+      - name: Fetch upstream metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_REPOSITORY" 2>/dev/null || git remote set-url upstream "$UPSTREAM_REPOSITORY"
+          git fetch --no-tags upstream main
+          echo "CUSTOM_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "UPSTREAM_COMMIT=$(git rev-parse upstream/main)" >> "$GITHUB_ENV"
+          echo "UPSTREAM_BASE=$(git merge-base HEAD upstream/main)" >> "$GITHUB_ENV"
+
+      - name: Install Web UI dependencies
+        shell: bash
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild node-pty
+
+      - name: Build Web UI
+        shell: bash
+        run: npm run build
+
+      - name: Keep production Web UI dependencies only
+        shell: bash
+        run: npm prune --omit=dev --no-audit --no-fund
+
+      - name: Install Desktop dependencies
+        shell: bash
+        run: npm ci --prefix packages/desktop --include=dev --no-audit --no-fund
+
+      - name: Write runtime metadata
+        shell: bash
+        env:
+          HERMES_DESKTOP_RUNTIME_RELEASE_TAG: ${{ vars.HERMES_DESKTOP_RUNTIME_RELEASE_TAG }}
+        run: npm --prefix packages/desktop run write:runtime-release
+
+      - name: Build Windows custom installer
+        shell: bash
+        env:
+          HERMES_STUDIO_CUSTOM_COMMIT: ${{ env.CUSTOM_COMMIT }}
+          HERMES_STUDIO_UPSTREAM_COMMIT: ${{ env.UPSTREAM_COMMIT }}
+          HERMES_STUDIO_UPSTREAM_BASE: ${{ env.UPSTREAM_BASE }}
+          HERMES_STUDIO_CUSTOM_BRANCH: ${{ env.CUSTOM_BRANCH }}
+        run: npm --prefix packages/desktop run dist:win -- --publish never
+
+      - name: Validate custom manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const { readFileSync, existsSync } = require('node:fs')
+          const path = 'packages/desktop/build/customization-manifest.json'
+          if (!existsSync(path)) throw new Error(`Missing ${path}`)
+          const manifest = JSON.parse(readFileSync(path, 'utf8'))
+          if (manifest.variant !== 'hermes-studio-custom') throw new Error('Wrong release variant')
+          if (manifest.update?.allowOfficialFallback !== false) throw new Error('Official updater fallback is enabled')
+          if (manifest.source?.repository !== 'https://github.com/jeaxindr-dotcom/hermes-studio') throw new Error('Wrong custom source repository')
+          if (!/^[0-9a-f]{40}$/i.test(manifest.source?.commit || '')) throw new Error('Missing full custom commit')
+          console.log(JSON.stringify({ version: manifest.desktopVersion, customCommit: manifest.source.commit, upstreamCommit: manifest.upstreamCommit }, null, 2))
+          NODE
+
+      - name: Publish custom Windows release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Hermes Studio Custom ${{ github.event.inputs.tag || github.ref_name }}
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            packages/desktop/release/*.exe
+            packages/desktop/release/*.exe.blockmap
+            packages/desktop/release/latest*.yml
+            packages/desktop/build/customization-manifest.json

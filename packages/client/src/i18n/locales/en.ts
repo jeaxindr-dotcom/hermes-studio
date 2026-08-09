@@ -726,6 +726,13 @@ export default {
     send: 'Send',
     contextUsed: 'Context used:',
     sessions: 'Sessions',
+    sessionStatus: {
+      working: 'This chat is working',
+      replied: 'New reply available',
+      waiting: 'Waiting for your response',
+      finished: 'Finished',
+      error: 'Last run failed',
+    },
     webUiSessions: 'Sessions',
     allProfiles: 'All profiles',
     profileMissingModelsTip: 'Profile "{profile}" has no available provider or model for this session',

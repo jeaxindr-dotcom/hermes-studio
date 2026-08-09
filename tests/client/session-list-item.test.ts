@@ -137,6 +137,7 @@ describe('SessionListItem', () => {
   })
 
   it('routes modified clicks through the desktop window handler when requested', async () => {
+    const openNew = vi.fn()
     const wrapper = mount(SessionListItem, {
       props: {
         session,
@@ -151,11 +152,14 @@ describe('SessionListItem', () => {
           ProfileAvatar: true,
         },
       },
+      attrs: {
+        onOpenNew: openNew,
+      },
     })
 
     await wrapper.get('a.session-item').trigger('click', { ctrlKey: true })
 
-    expect(wrapper.emitted('open-new')).toHaveLength(1)
+    expect(openNew).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('select')).toBeUndefined()
   })
 
@@ -286,5 +290,26 @@ describe('SessionListItem', () => {
     expect(logo.attributes('src')).toBe('/coding-agents/codex-openai.png')
     expect(logo.attributes('alt')).toBe('Codex')
     expect(wrapper.find('.session-item-agent-name').exists()).toBe(false)
+  })
+
+  it('renders the status dot and accessible label for the chat state', () => {
+    const wrapper = mount(SessionListItem, {
+      props: {
+        session: { ...session, messageCount: 1 },
+        active: false,
+        pinned: false,
+        canDelete: true,
+        status: 'waiting',
+      },
+      global: {
+        stubs: {
+          ProfileAvatar: true,
+        },
+      },
+    })
+
+    const dot = wrapper.get('.session-item-status-dot')
+    expect(dot.classes()).toContain('session-item-status-dot--waiting')
+    expect(dot.attributes('aria-label')).toBe('chat.sessionStatus.waiting')
   })
 })

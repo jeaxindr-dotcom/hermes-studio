@@ -72,7 +72,8 @@ jobs:
               write_common_outputs "Windows x64" "windows-latest" "--win nsis --x64" "desktop-win32-x64" \
                 "packages/desktop/release/*.exe" \
                 "packages/desktop/release/*.exe.blockmap" \
-                "packages/desktop/release/latest*.yml"
+                "packages/desktop/release/latest*.yml" \
+                "packages/desktop/build/customization-manifest.json"
               ;;
             darwin-arm64)
               write_common_outputs "macOS arm64" "macos-26" "--mac dmg zip --arm64" "desktop-darwin-arm64" \

@@ -1,20 +1,20 @@
 import { app, dialog } from 'electron'
 import { autoUpdater, type ProgressInfo, type UpdateDownloadedEvent, type UpdateInfo } from 'electron-updater'
 import { execFile } from 'node:child_process'
+import { request as httpsRequest } from 'node:https'
 import { rm } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
+import { URL } from 'node:url'
 import { t } from './desktop-i18n'
+import { customizationManifestUrl, CUSTOM_UPDATE_FEED_URL, CUSTOM_UPDATE_TRUSTED_HOSTS, validateCustomizationManifest } from './custom-update-manifest'
 import { isWindowsUpdaterLockError, pendingUpdateDirectories } from './updater-helpers'
 
 let initialized = false
 let checking = false
 let downloadedUpdate: UpdateDownloadedEvent | null = null
-let tryingFallbackFeed = false
 let recoveringPendingUpdate = false
 
-const CLOUDFLARE_LATEST_FEED_URL = 'https://download.ekkolearnai.com/latest'
-const GITHUB_LATEST_FEED_URL = 'https://github.com/EKKOLearnAI/hermes-studio/releases/latest/download'
 const execFileAsync = promisify(execFile)
 
 interface AutoUpdaterOptions {
@@ -30,20 +30,60 @@ function configureUpdateFeed(url: string): void {
   })
 }
 
-async function checkForUpdatesWithFallback(): Promise<void> {
-  configureUpdateFeed(CLOUDFLARE_LATEST_FEED_URL)
-  try {
-    await autoUpdater.checkForUpdates()
-  } catch (err) {
-    console.warn(`[updater] Cloudflare update feed failed, trying GitHub: ${err instanceof Error ? err.message : String(err)}`)
-    tryingFallbackFeed = true
-    try {
-      configureUpdateFeed(GITHUB_LATEST_FEED_URL)
-      await autoUpdater.checkForUpdates()
-    } finally {
-      tryingFallbackFeed = false
-    }
+function fetchJson(url: string, redirectCount = 0): Promise<unknown> {
+  const requestUrl = new URL(url)
+  if (requestUrl.protocol !== 'https:' || !CUSTOM_UPDATE_TRUSTED_HOSTS.includes(requestUrl.hostname as typeof CUSTOM_UPDATE_TRUSTED_HOSTS[number])) {
+    return Promise.reject(new Error('Customization manifest redirect left the trusted HTTPS release hosts.'))
   }
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Hermes-Studio-Custom-Updater',
+      },
+    }, response => {
+      const status = response.statusCode || 0
+      const location = response.headers.location
+      if (status >= 300 && status < 400 && location) {
+        response.resume()
+        if (redirectCount >= 5) {
+          reject(new Error('Too many redirects while reading the customization manifest.'))
+          return
+        }
+        fetchJson(new URL(location, url).toString(), redirectCount + 1).then(resolve, reject)
+        return
+      }
+
+      let body = ''
+      response.setEncoding('utf8')
+      response.on('data', chunk => { body += chunk })
+      response.on('end', () => {
+        if (status < 200 || status >= 300) {
+          reject(new Error(`Customization manifest request failed with HTTP ${status}.`))
+          return
+        }
+        try {
+          resolve(JSON.parse(body))
+        } catch {
+          reject(new Error('Customization manifest is not valid JSON.'))
+        }
+      })
+    })
+    request.on('error', reject)
+    request.end()
+  })
+}
+
+async function verifyCustomUpdateManifest(info: UpdateInfo): Promise<void> {
+  const manifest = await fetchJson(customizationManifestUrl(CUSTOM_UPDATE_FEED_URL))
+  const validation = validateCustomizationManifest(manifest, info.version)
+  if (!validation.ok) throw new Error(validation.reason)
+  console.log(`[updater] validated Hermes Studio Custom update ${info.version}`)
+}
+
+async function checkForUpdates(): Promise<void> {
+  configureUpdateFeed(CUSTOM_UPDATE_FEED_URL)
+  await autoUpdater.checkForUpdates()
 }
 
 function showUpToDate(info?: UpdateInfo) {
@@ -193,11 +233,13 @@ export function initAutoUpdater(nextOptions: AutoUpdaterOptions = {}) {
   autoUpdater.autoInstallOnAppQuit = true
 
   autoUpdater.on('update-available', info => {
-    console.log(`[updater] update available: ${info.version}`)
-    promptDownloadAvailableUpdate(info).catch(err => {
-      console.error('[updater] update download failed:', err)
-      showUpdateCheckFailed()
-    })
+    console.log(`[updater] custom update available: ${info.version}`)
+    verifyCustomUpdateManifest(info)
+      .then(() => promptDownloadAvailableUpdate(info))
+      .catch(err => {
+        console.error('[updater] rejected unvalidated custom update:', err)
+        if (checking) showUpdateCheckFailed()
+      })
   })
   autoUpdater.on('update-not-available', info => {
     console.log('[updater] up to date')
@@ -208,7 +250,7 @@ export function initAutoUpdater(nextOptions: AutoUpdaterOptions = {}) {
     recoverFailedPendingUpdate(err).catch(cleanupErr => {
       console.warn(`[updater] pending update recovery failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`)
     })
-    if (checking && !tryingFallbackFeed) showUpdateCheckFailed()
+    if (checking) showUpdateCheckFailed()
   })
   autoUpdater.on('download-progress', (info: ProgressInfo) => {
     console.log(`[updater] download ${Math.round(info.percent)}%`)
@@ -254,7 +296,7 @@ export async function checkForDesktopUpdates(manual: boolean): Promise<void> {
 
   checking = manual
   try {
-    await checkForUpdatesWithFallback()
+    await checkForUpdates()
   } catch (err) {
     if (manual) showUpdateCheckFailed()
     throw err

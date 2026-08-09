@@ -19,16 +19,17 @@
     "fetch:hermes": "node scripts/fetch-hermes.mjs",
     "install:hermes": "node scripts/install-hermes.mjs",
     "write:runtime-release": "node scripts/write-runtime-release.mjs",
+    "write:customization-manifest": "node scripts/write-customization-manifest.mjs",
     "prepare:runtime": "npm run fetch:node && npm run fetch:git && npm run fetch:python && npm run fetch:hermes && npm run install:hermes && npm run prune:python",
     "prepare:python": "npm run prepare:runtime",
     "package:runtime": "node scripts/package-runtime.mjs",
     "runtime:asset-name": "node scripts/runtime-asset-name.mjs",
     "prune:python": "node scripts/prune-python.mjs",
     "dev": "npm run build:main && electron .",
-    "dist": "npm run build && node scripts/electron-builder.mjs",
-    "dist:mac": "npm run build && node scripts/electron-builder.mjs --mac",
-    "dist:win": "npm run build && node scripts/electron-builder.mjs --win",
-    "dist:linux": "npm run build && node scripts/electron-builder.mjs --linux"
+    "dist": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs",
+    "dist:mac": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs --mac",
+    "dist:win": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs --win",
+    "dist:linux": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs --linux"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",

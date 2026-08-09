@@ -62,6 +62,7 @@
     "build:desktop:mac": "npm run build && npm run desktop:install && npm --prefix packages/desktop run dist -- --mac --publish never",
     "build:desktop:win": "npm run build && npm run desktop:install && npm --prefix packages/desktop run dist -- --win --publish never",
     "build:desktop:linux": "npm run build && npm run desktop:install && npm --prefix packages/desktop run dist -- --linux --publish never",
+    "upstream:report": "node scripts/custom-update-manager.mjs report --ours feat/agents-tasks-code-workspace --theirs upstream/main --output .hermes/upstream-report.json",
     "openapi:generate": "node scripts/generate-openapi.mjs",
     "claude": "claude --dangerously-skip-permissions",
     "test:workflow-live": "vite-node scripts/workflow-live-acceptance.ts"

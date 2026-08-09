@@ -3,6 +3,7 @@ import { computed, ref, onUnmounted } from 'vue'
 import { NPopconfirm, NCheckbox, NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { Session } from '@/stores/hermes/chat'
+import type { SessionStatus } from '@/utils/hermes/session-status'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
@@ -14,6 +15,7 @@ const props = withDefaults(defineProps<{
   pinned: boolean
   canDelete: boolean
   streaming?: boolean
+  status?: SessionStatus
   completedUnread?: boolean
   selectable?: boolean
   selected?: boolean
@@ -44,6 +46,17 @@ const profileHasModels = computed(() => {
 const profileModelsMissing = computed(() =>
   appStore.profileModelGroups.length > 0 && !profileHasModels.value,
 )
+const sessionStatus = computed<SessionStatus>(() => props.status || 'none')
+const sessionStatusLabel = computed(() => {
+  switch (sessionStatus.value) {
+    case 'working': return t('chat.sessionStatus.working')
+    case 'replied': return t('chat.sessionStatus.replied')
+    case 'waiting': return t('chat.sessionStatus.waiting')
+    case 'finished': return t('chat.sessionStatus.finished')
+    case 'error': return t('chat.sessionStatus.error')
+    default: return ''
+  }
+})
 const isGlobalAgentSession = computed(() => props.session.source === 'global_agent')
 const sessionAgentLogo = computed(() => {
   if (isGlobalAgentSession.value) {
@@ -162,6 +175,14 @@ onUnmounted(() => {
           </NTooltip>
         </span>
         <span class="session-item-time">{{ formatTimestampMs(session.createdAt) }}</span>
+        <span
+          v-if="sessionStatus !== 'none'"
+          class="session-item-status-dot"
+          :class="`session-item-status-dot--${sessionStatus}`"
+          role="img"
+          :aria-label="sessionStatusLabel"
+          :title="sessionStatusLabel"
+        />
       </span>
       <span class="session-item-agent-row">
         <span class="session-item-agent-logo-wrap" :class="{ streaming }">
@@ -319,6 +340,50 @@ onUnmounted(() => {
   flex: 0 0 auto;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.session-item-status-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-inline-start: 1px;
+  border-radius: 50%;
+  background: var(--session-status-color, var(--text-muted));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--session-status-color, var(--text-muted)) 18%, transparent);
+}
+
+.session-item-status-dot--working {
+  --session-status-color: #3b82f6;
+  animation: session-status-pulse 1.35s ease-in-out infinite;
+}
+
+.session-item-status-dot--replied {
+  --session-status-color: #22c55e;
+}
+
+.session-item-status-dot--waiting {
+  --session-status-color: #eab308;
+  animation: session-status-pulse 1.8s ease-in-out infinite;
+}
+
+.session-item-status-dot--finished {
+  --session-status-color: #a855f7;
+}
+
+.session-item-status-dot--error {
+  --session-status-color: #ef4444;
+}
+
+@keyframes session-status-pulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
 }
 
 .session-item-global-icon {

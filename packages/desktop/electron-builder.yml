@@ -36,6 +36,7 @@ extraResources:
       - "trayMac@2x.png"
       - "trayWindows.png"
       - "runtime-release.json"
+      - "customization-manifest.json"
   - from: "../.."
     to: "webui"
     filter:

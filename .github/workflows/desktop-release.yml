@@ -51,6 +51,7 @@ jobs:
               packages/desktop/release/*.exe
               packages/desktop/release/*.exe.blockmap
               packages/desktop/release/latest*.yml
+              packages/desktop/build/customization-manifest.json
           - label: Linux x64
             runner: ubuntu-22.04
             target_os: linux

@@ -683,6 +683,13 @@ export default {
     send: 'Envoyer',
     contextUsed: 'Contexte utilise :',
     sessions: 'Sessions',
+    sessionStatus: {
+      working: 'Discussion en cours',
+      replied: 'Nouvelle réponse disponible',
+      waiting: 'En attente de votre réponse',
+      finished: 'Terminé',
+      error: 'Le dernier run a échoué',
+    },
     webUiSessions: 'Sessions',
     allProfiles: 'Tous les profils',
     profileMissingModelsTip: 'Le profil "{profile}" n’a aucun fournisseur ni modèle disponible pour cette session',
