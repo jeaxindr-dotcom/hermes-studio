@@ -1,6 +1,6 @@
 import { WebSocketServer } from 'ws'
 import type { Server as HttpServer } from 'http'
-import { accessSync, chmodSync, constants as fsConstants, existsSync } from 'fs'
+import { accessSync, chmodSync, constants as fsConstants, existsSync, realpathSync, statSync } from 'fs'
 import { dirname, join, isAbsolute, resolve as resolvePath } from 'path'
 import { homedir } from 'os'
 import { getActiveProfileDir } from '../../services/hermes/hermes-profile'
@@ -9,6 +9,7 @@ import { authenticateUserToken, isAuthEnabled } from '../../middleware/user-auth
 import { logger } from '../../services/logger'
 import { config } from '../../config'
 import { shouldRejectUpgradeOrigin, writeForbiddenOrigin } from '../../security'
+import { getSession } from '../../db/hermes/session-store'
 
 let pty: any = null
 
@@ -90,6 +91,20 @@ export function resolveTerminalCwd(
   return cwd
 }
 
+export function canonicalTerminalWorkspace(workspace: string): string {
+  const raw = String(workspace || '').trim()
+  if (!raw) throw new Error('Session workspace not found')
+  const canonical = realpathSync(raw)
+  if (!statSync(canonical).isDirectory()) throw new Error('Session workspace is not a directory')
+  return canonical
+}
+
+function terminalWorkspaceForSession(sessionId: string): string {
+  const session = getSession(sessionId)
+  if (!session) throw new Error('Workspace session not found')
+  return canonicalTerminalWorkspace(String(session.workspace || ''))
+}
+
 // ─── Session types ──────────────────────────────────────────────
 
 interface PtySession {
@@ -112,7 +127,7 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
-function createSession(shell: string): PtySession {
+function createSession(shell: string, workspaceCwd?: string | null): PtySession {
   const id = generateId()
   let ptyProcess: PtySession['pty']
   try {
@@ -120,7 +135,7 @@ function createSession(shell: string): PtySession {
       name: 'xterm-color',
       cols: 80,
       rows: 24,
-      cwd: resolveTerminalCwd(),
+      cwd: workspaceCwd || resolveTerminalCwd(getTerminalConfig(), getActiveProfileDir()),
     })
   } catch (err: any) {
     throw new Error(`Failed to spawn shell "${shell}": ${err.message}`)
@@ -177,13 +192,26 @@ export function setupTerminalWebSocket(httpServers: HttpServer | HttpServer[]) {
         }
       }
 
+      const workspaceSessionId = url.searchParams.get('workspaceSessionId')?.trim() || ''
+      if (workspaceSessionId) {
+        try {
+          ;(req as any).terminalWorkspaceCwd = terminalWorkspaceForSession(workspaceSessionId)
+        } catch (err: any) {
+          socket.write(['HTTP/1.1 400 Bad Request', 'Content-Type: text/plain', '', 'Invalid workspace session'].join(String.fromCharCode(13, 10)))
+          socket.destroy()
+          logger.warn({ err, workspaceSessionId }, 'Rejected terminal workspace session')
+          return
+        }
+      }
+
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit('connection', ws, req)
       })
     })
   })
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    const connectionCwd = String((req as any).terminalWorkspaceCwd || '') || null
     const conn: Connection = {
       sessions: new Map(),
       activeSessionId: null,
@@ -255,7 +283,7 @@ export function setupTerminalWebSocket(httpServers: HttpServer | HttpServer[]) {
           const shell = parsed.shell || defaultShell
           let session: PtySession
           try {
-            session = createSession(shell)
+            session = createSession(shell, connectionCwd)
           } catch (err: any) {
             ws.send(JSON.stringify({ type: 'error', message: err.message }))
             return
@@ -351,7 +379,7 @@ export function setupTerminalWebSocket(httpServers: HttpServer | HttpServer[]) {
 
     let firstSession: PtySession
     try {
-      firstSession = createSession(defaultShell)
+      firstSession = createSession(defaultShell, connectionCwd)
     } catch (err: any) {
       ws.send(JSON.stringify({ type: 'error', message: err.message }))
       logger.error(err, 'Failed to create session')

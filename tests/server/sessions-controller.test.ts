@@ -14,6 +14,7 @@ const getSessionDetailFromDbWithProfileMock = vi.fn()
 const getExactSessionDetailFromDbWithProfileMock = vi.fn()
 const getUsageStatsFromDbMock = vi.fn()
 const getSessionMock = vi.fn()
+const getPersistedSessionActivityMock = vi.fn()
 const deleteHermesSessionForProfileMock = vi.fn()
 const localListSessionsMock = vi.fn()
 const localGetSessionDetailMock = vi.fn()
@@ -94,6 +95,10 @@ vi.mock('../../packages/server/src/db/hermes/session-store', () => ({
   getSession: getSessionMock,
   updateSession: localUpdateSessionMock,
   updateSessionStats: localUpdateSessionStatsMock,
+}))
+
+vi.mock('../../packages/server/src/db/hermes/session-activity-db', () => ({
+  getPersistedSessionActivity: getPersistedSessionActivityMock,
 }))
 
 vi.mock('../../packages/server/src/db/hermes/session-category-store', () => ({
@@ -183,6 +188,7 @@ describe('session conversations controller', () => {
     getExactSessionDetailFromDbWithProfileMock.mockReset()
     getUsageStatsFromDbMock.mockReset()
     getSessionMock.mockReset()
+    getPersistedSessionActivityMock.mockReset()
     deleteHermesSessionForProfileMock.mockReset()
     localListSessionsMock.mockReset()
     localGetSessionDetailMock.mockReset()
@@ -236,6 +242,50 @@ describe('session conversations controller', () => {
     bridgeGetRuntimeStateMock.mockReset()
     bridgeGetRuntimeStateMock.mockReturnValue({ ready: false, running: false, endpoint: 'ipc:///tmp/hermes-agent-bridge.sock' })
     codingAgentRunManagerMock.stop.mockReset()
+  })
+
+  it('authorizes persisted activity using the session profile rather than a client-selected profile', async () => {
+    getSessionMock.mockReturnValue({ id: 'session-1', profile: 'research' })
+    getPersistedSessionActivityMock.mockResolvedValue({ sessionId: 'session-1', todo: null, streams: [] })
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'research' }])
+    const mod = await import('../../packages/server/src/controllers/hermes/sessions')
+    const ctx: any = {
+      params: { id: 'session-1' },
+      query: {},
+      state: { user: { id: 'user-1', role: 'admin' } },
+      body: null,
+    }
+
+    await mod.getSessionActivity(ctx)
+
+    expect(getPersistedSessionActivityMock).toHaveBeenCalledWith('session-1', 'research')
+    expect(ctx.body).toEqual({ sessionId: 'session-1', todo: null, streams: [] })
+  })
+
+  it('rejects unauthorized and explicitly mismatched activity profiles', async () => {
+    getSessionMock.mockReturnValue({ id: 'session-1', profile: 'private' })
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'allowed' }])
+    const mod = await import('../../packages/server/src/controllers/hermes/sessions')
+    const denied: any = {
+      params: { id: 'session-1' },
+      query: {},
+      state: { user: { id: 'user-1', role: 'admin' } },
+      body: null,
+    }
+    await mod.getSessionActivity(denied)
+    expect(denied.status).toBe(403)
+    expect(getPersistedSessionActivityMock).not.toHaveBeenCalled()
+
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'private' }])
+    const mismatched: any = {
+      params: { id: 'session-1' },
+      query: { profile: 'allowed' },
+      state: { user: { id: 'user-1', role: 'admin' } },
+      body: null,
+    }
+    await mod.getSessionActivity(mismatched)
+    expect(mismatched.status).toBe(400)
+    expect(getPersistedSessionActivityMock).not.toHaveBeenCalled()
   })
 
   it('lists conversations from the local session store', async () => {

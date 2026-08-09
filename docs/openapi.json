@@ -1360,6 +1360,10 @@
                   },
                   "provider": {
                     "type": "string"
+                  },
+                  "workspaceSessionId": {
+                    "nullable": true,
+                    "type": "string"
                   }
                 }
               }
@@ -1430,6 +1434,10 @@
                     "type": "string"
                   },
                   "provider": {
+                    "type": "string"
+                  },
+                  "workspaceSessionId": {
+                    "nullable": true,
                     "type": "string"
                   }
                 }
@@ -1504,6 +1512,10 @@
                     "type": "string"
                   },
                   "sessionId": {
+                    "type": "string"
+                  },
+                  "workspaceSessionId": {
+                    "nullable": true,
                     "type": "string"
                   }
                 }
@@ -11505,6 +11517,53 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/sessions/{id}/activity": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get activity",
+        "description": "GET /api/hermes/sessions/:id/activity",
+        "operationId": "getSessionActivity",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
             }
           }
         ]

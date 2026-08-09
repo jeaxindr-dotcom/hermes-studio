@@ -94,7 +94,7 @@ function sessionDbPath(): string {
   return join(getActiveProfileDir(), 'state.db')
 }
 
-function sessionDbPathForProfile(profile?: string): string {
+export function sessionDbPathForProfile(profile?: string): string {
   const name = String(profile || '').trim()
   if (!name) return sessionDbPath()
   if (name === 'default') return join(getHermesBaseDir(), 'state.db')

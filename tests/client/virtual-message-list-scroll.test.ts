@@ -148,6 +148,35 @@ describe('VirtualMessageList scroll behavior', () => {
     expect((wrapper.vm as any).shouldAutoFollowBottom(100)).toBe(true)
   })
 
+  it('routes a vertical mouse wheel over message content to the conversation scroller', async () => {
+    const wrapper = mount(VirtualMessageList, {
+      props: {
+        messages: [{ id: 'message-1' }],
+        virtualized: false,
+      },
+      slots: {
+        item: '<div class="markdown-body">message</div>',
+      },
+    })
+    await nextTick()
+
+    const scroller = wrapper.find<HTMLElement>('.virtual-message-list')
+    const message = wrapper.get<HTMLElement>('.markdown-body')
+    setScrollerMetrics(scroller.element, {
+      scrollHeight: 1200,
+      clientHeight: 400,
+      scrollTop: 600,
+    })
+
+    const wheel = new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true })
+    message.element.dispatchEvent(wheel)
+    await nextTick()
+
+    expect(scroller.element.scrollTop).toBe(480)
+    expect(wheel.defaultPrevented).toBe(true)
+    expect((wrapper.vm as any).shouldAutoFollowBottom(100)).toBe(false)
+  })
+
   it('does not keep scrolling every animation frame for the whole keep-alive window', async () => {
     const wrapper = mount(VirtualMessageList, {
       props: {
@@ -266,6 +295,44 @@ describe('VirtualMessageList scroll behavior', () => {
     }
 
     expect(scroller.element.scrollTop).toBe(1000)
+  })
+
+  it('does not re-pin after a small upward wheel when rendered content grows', async () => {
+    const wrapper = mount(VirtualMessageList, {
+      props: {
+        messages: [{ id: 'message-1' }],
+        virtualized: false,
+      },
+      slots: {
+        item: '<div class="message-content">message</div>',
+      },
+    })
+    await nextTick()
+
+    const scroller = wrapper.find<HTMLElement>('.virtual-message-list')
+    const message = wrapper.get<HTMLElement>('.message-content')
+    setScrollerMetrics(scroller.element, {
+      scrollHeight: 1000,
+      clientHeight: 400,
+      scrollTop: 600,
+    })
+    await scroller.trigger('scroll')
+
+    message.element.dispatchEvent(new WheelEvent('wheel', {
+      deltaY: -40,
+      bubbles: true,
+      cancelable: true,
+    }))
+    await nextTick()
+    expect(scroller.element.scrollTop).toBe(560)
+
+    Object.defineProperty(scroller.element, 'scrollHeight', { configurable: true, value: 1010 })
+    resizeCallbacks.forEach(callback => callback([], {} as ResizeObserver))
+    while (rafCallbacks.length > 0) {
+      rafCallbacks.shift()?.(performance.now())
+    }
+
+    expect(scroller.element.scrollTop).toBe(560)
   })
 
   it('captures the top visible message as the viewport anchor', async () => {

@@ -61,6 +61,7 @@ import MessageList from '@/components/hermes/chat/MessageList.vue'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
 import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
+import PageSidebarResizeHandle from '@/components/layout/PageSidebarResizeHandle.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
@@ -2948,6 +2949,11 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
       </div>
       <PageSidebarFooter v-if="showWorkflowSidebar" />
     </aside>
+    <PageSidebarResizeHandle
+      v-if="showWorkflowSidebar"
+      :offset="12"
+      :label="t('chat.resizeSidebar')"
+    />
 
     <main
       class="workflow-main"
@@ -3734,7 +3740,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-sidebar {
-  width: $sidebar-width;
+  width: var(--page-sidebar-width, #{$sidebar-width});
   min-height: 0;
   align-self: stretch;
   margin: 10px;

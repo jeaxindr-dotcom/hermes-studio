@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useSessionSearch } from '@/composables/useSessionSearch'
+import SessionActivityPanel from '@/components/hermes/chat/SessionActivityPanel.vue'
+import {
+  OPEN_SUBAGENT_STREAM_EVENT,
+  openSubagentStream,
+  type OpenSubagentStreamDetail,
+} from '@/utils/hermes/subagent-stream'
 
-type ActiveSection = 'chat' | 'history' | 'group' | 'global' | 'workflow'
+type ActiveSection = 'chat' | 'history' | 'group' | 'global' | 'workflow' | 'code'
 
 const props = defineProps<{
   active: ActiveSection
@@ -26,6 +32,7 @@ const showModeSwitch = computed(() => !props.hideModeSwitch)
 const historyButtonLabel = computed(() =>
   props.active === 'history' ? t('chat.sessions') : t('sidebar.history'),
 )
+let forwardingSubagentStream = false
 
 function openChat() {
   if (props.active === 'chat') return
@@ -49,6 +56,29 @@ function openWorkflow() {
   if (props.active === 'workflow') return
   void router.push({ name: 'hermes.workflow' })
 }
+
+function openCode() {
+  if (props.active === 'code') return
+  void router.push({ name: 'hermes.code' })
+}
+
+async function forwardSubagentStreamToChat(event: Event) {
+  if (props.active === 'chat' || props.active === 'code' || forwardingSubagentStream) return
+  const detail = (event as CustomEvent<OpenSubagentStreamDetail>).detail
+  if (!detail?.sessionId || !detail.subagentId) return
+
+  forwardingSubagentStream = true
+  try {
+    await router.push({ name: 'hermes.chat' })
+    await nextTick()
+    openSubagentStream(detail.sessionId, `subagent:${detail.subagentId}`)
+  } finally {
+    forwardingSubagentStream = false
+  }
+}
+
+onMounted(() => window.addEventListener(OPEN_SUBAGENT_STREAM_EVENT, forwardSubagentStreamToChat))
+onBeforeUnmount(() => window.removeEventListener(OPEN_SUBAGENT_STREAM_EVENT, forwardSubagentStreamToChat))
 
 function openApiRelay() {
   if (typeof window === 'undefined') return
@@ -141,7 +171,7 @@ function openApiRelay() {
         <span>{{ t('sidebar.apiRelay') }}</span>
       </button>
     </div>
-    <div v-if="showModeSwitch" class="conversation-switch conversation-switch--three" role="tablist" aria-label="Conversation type">
+    <div v-if="showModeSwitch" class="conversation-switch conversation-switch--four" role="tablist" aria-label="Conversation type">
       <NTooltip trigger="hover" placement="top">
         <template #trigger>
           <button
@@ -203,7 +233,28 @@ function openApiRelay() {
         </template>
         {{ t('sidebar.workflow') }}
       </NTooltip>
+      <NTooltip trigger="hover" placement="top">
+        <template #trigger>
+          <button
+            class="conversation-switch-tab"
+            :class="{ active: active === 'code' }"
+            type="button"
+            role="tab"
+            :aria-label="t('sidebar.code')"
+            :aria-selected="active === 'code'"
+            @click="openCode"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="8 9 4 12 8 15" />
+              <polyline points="16 9 20 12 16 15" />
+              <line x1="14" y1="5" x2="10" y2="19" />
+            </svg>
+          </button>
+        </template>
+        {{ t('sidebar.code') }}
+      </NTooltip>
     </div>
+    <SessionActivityPanel />
   </div>
 </template>
 
@@ -270,8 +321,8 @@ function openApiRelay() {
   background: rgba(var(--accent-primary-rgb), 0.05);
 }
 
-.conversation-switch--three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.conversation-switch--four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .conversation-switch-tab {
@@ -305,7 +356,7 @@ function openApiRelay() {
   }
 }
 
-:global(.dark .conversation-switch--three .conversation-switch-tab.active) {
+:global(.dark .conversation-switch--four .conversation-switch-tab.active) {
   background: $bg-card-hover;
   color: $accent-primary;
   box-shadow:

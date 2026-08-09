@@ -93,6 +93,7 @@ export interface CodingAgentConfigScope {
 export interface CodingAgentLaunchRequest {
   mode?: CodingAgentLaunchMode
   profile?: string | null
+  workspaceSessionId?: string | null
   provider?: string
   model?: string
   baseUrl?: string

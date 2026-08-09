@@ -49,6 +49,16 @@ function normalizeProfile(profile?: string | null): string | null {
   return value || null
 }
 
+export interface EditorTab {
+  path: string
+  content: string
+  originalContent: string
+  language: string
+  workspaceSessionId?: string
+  workspaceRoomId?: string
+  workspaceRelativePath?: string
+}
+
 export const useFilesStore = defineStore('files', () => {
   const currentPath = ref('')
   const currentProfile = ref<string | null>(null)
@@ -60,15 +70,84 @@ export const useFilesStore = defineStore('files', () => {
   const sortOrder = ref<'asc' | 'desc'>('asc')
   let fetchRequestSeq = 0
 
-  const editingFile = ref<{
-    path: string
-    content: string
-    originalContent: string
-    language: string
-    workspaceSessionId?: string
-    workspaceRoomId?: string
-    workspaceRelativePath?: string
-  } | null>(null)
+  const editingFile = ref<EditorTab | null>(null)
+  const editorTabs = ref<EditorTab[]>([])
+
+  function editorTabKey(file: EditorTab): string {
+    if (file.workspaceSessionId) return `session:${file.workspaceSessionId}:${file.workspaceRelativePath || file.path}`
+    if (file.workspaceRoomId) return `room:${file.workspaceRoomId}:${file.workspaceRelativePath || file.path}`
+    return `profile:${currentProfile.value || 'default'}:${file.path}`
+  }
+
+  function currentEditorTabKey(filePath: string): string {
+    if (currentWorkspaceSessionId.value) return `session:${currentWorkspaceSessionId.value}:${filePath}`
+    if (currentWorkspaceRoomId.value) return `room:${currentWorkspaceRoomId.value}:${filePath}`
+    return `profile:${currentProfile.value || 'default'}:${filePath}`
+  }
+
+  const activeEditorTabKey = computed(() => editingFile.value ? editorTabKey(editingFile.value) : null)
+
+  function activateEditorTab(key: string): boolean {
+    const tab = editorTabs.value.find(candidate => editorTabKey(candidate) === key)
+    if (!tab) return false
+    editingFile.value = tab
+    return true
+  }
+
+  async function openEditorTab(filePath: string, options: { profile?: string | null } = {}) {
+    const key = currentEditorTabKey(filePath)
+    if (activateEditorTab(key)) return
+    await openEditor(filePath, options)
+    const opened = editingFile.value
+    if (!opened) return
+    const openedKey = editorTabKey(opened)
+    const existing = editorTabs.value.find(candidate => editorTabKey(candidate) === openedKey)
+    if (existing) {
+      editingFile.value = existing
+      return
+    }
+    editorTabs.value.push(opened)
+  }
+
+  function closeEditorTab(key: string) {
+    const index = editorTabs.value.findIndex(candidate => editorTabKey(candidate) === key)
+    if (index < 0) return
+    const wasActive = activeEditorTabKey.value === key
+    editorTabs.value.splice(index, 1)
+    if (!wasActive) return
+    editingFile.value = editorTabs.value[index] || editorTabs.value[index - 1] || null
+  }
+
+  function closeAllEditorTabs() {
+    editorTabs.value = []
+    editingFile.value = null
+  }
+
+  function editorTabHasUnsavedChanges(tab: EditorTab): boolean {
+    return tab.content !== tab.originalContent
+  }
+
+  const hasAnyUnsavedChanges = computed(() => editorTabs.value.some(editorTabHasUnsavedChanges))
+
+  function closeEditorTabsAffectedBy(changedPath: string, changedIsDir: boolean) {
+    const active = editingFile.value
+    editorTabs.value = editorTabs.value.filter(tab => !isAffected(tab.path, changedPath, changedIsDir))
+    if (active && isAffected(active.path, changedPath, changedIsDir)) {
+      editingFile.value = editorTabs.value[0] || null
+    }
+  }
+
+  function remapEditorTabsAfterRename(oldPath: string, newPath: string, changedIsDir: boolean) {
+    const remap = (tab: EditorTab) => {
+      if (!isAffected(tab.path, oldPath, changedIsDir)) return
+      const suffix = tab.path.slice(oldPath.length)
+      tab.path = `${newPath}${suffix}`
+      if (tab.workspaceRelativePath) tab.workspaceRelativePath = `${newPath}${suffix}`
+      tab.language = getLanguageFromPath(tab.path)
+    }
+    for (const tab of editorTabs.value) remap(tab)
+    if (editingFile.value && !editorTabs.value.includes(editingFile.value)) remap(editingFile.value)
+  }
 
   const previewFile = ref<{
     path: string
@@ -128,7 +207,7 @@ export const useFilesStore = defineStore('files', () => {
     return filesApi.listFiles(path, profile)
   }
 
-  async function fetchEntries(path?: string, options: { profile?: string | null; workspaceSessionId?: string | null; workspaceRoomId?: string | null } = {}) {
+  async function fetchEntries(path?: string, options: { profile?: string | null; workspaceSessionId?: string | null; workspaceRoomId?: string | null; discardUnsavedChanges?: boolean } = {}) {
     const requestSeq = ++fetchRequestSeq
     if (path !== undefined && path !== currentPath.value) {
       // Switching directory invalidates the current preview; close it so the
@@ -144,15 +223,23 @@ export const useFilesStore = defineStore('files', () => {
     let nextWorkspaceRoomId = resolveWorkspaceRoomId(options.workspaceRoomId)
     if (options.workspaceSessionId !== undefined && nextWorkspaceSessionId) nextWorkspaceRoomId = null
     if (options.workspaceRoomId !== undefined && nextWorkspaceRoomId) nextWorkspaceSessionId = null
-    currentWorkspaceSessionId.value = nextWorkspaceSessionId
-    currentWorkspaceRoomId.value = nextWorkspaceRoomId
-    const nextProfile = nextWorkspaceSessionId || nextWorkspaceRoomId ? null : resolveProfile(options.profile)
-    currentProfile.value = nextProfile
-    if (path !== undefined) currentPath.value = path
-    if (
+    const nextProfile = nextWorkspaceSessionId || nextWorkspaceRoomId
+      ? null
+      : options.profile === undefined ? currentProfile.value : normalizeProfile(options.profile)
+    const editorScopeChanged =
       previousWorkspaceSessionId !== nextWorkspaceSessionId ||
       previousWorkspaceRoomId !== nextWorkspaceRoomId ||
-      previousProfile !== nextProfile ||
+      previousProfile !== nextProfile
+    if (editorScopeChanged && hasAnyUnsavedChanges.value && !options.discardUnsavedChanges) {
+      throw Object.assign(new Error('Unsaved editor changes'), { code: 'unsaved_editor_changes' })
+    }
+    currentWorkspaceSessionId.value = nextWorkspaceSessionId
+    currentWorkspaceRoomId.value = nextWorkspaceRoomId
+    currentProfile.value = nextProfile
+    if (path !== undefined) currentPath.value = path
+    if (editorScopeChanged) closeAllEditorTabs()
+    if (
+      editorScopeChanged ||
       previousPath !== currentPath.value
     ) {
       entries.value = []
@@ -170,6 +257,22 @@ export const useFilesStore = defineStore('files', () => {
     } finally {
       if (requestSeq === fetchRequestSeq) loading.value = false
     }
+  }
+
+  function clearWorkspaceScope(options: { discardUnsavedChanges?: boolean } = {}) {
+    const editorScopeChanged = Boolean(currentWorkspaceSessionId.value || currentWorkspaceRoomId.value || currentProfile.value)
+    if (editorScopeChanged && hasAnyUnsavedChanges.value && !options.discardUnsavedChanges) {
+      throw Object.assign(new Error('Unsaved editor changes'), { code: 'unsaved_editor_changes' })
+    }
+    fetchRequestSeq += 1
+    currentWorkspaceSessionId.value = null
+    currentWorkspaceRoomId.value = null
+    currentProfile.value = null
+    currentPath.value = ''
+    entries.value = []
+    previewFile.value = null
+    loading.value = false
+    if (editorScopeChanged) closeAllEditorTabs()
   }
 
   function navigateTo(path: string, options: { profile?: string | null; workspaceSessionId?: string | null; workspaceRoomId?: string | null } = {}) { return fetchEntries(path, options) }
@@ -388,9 +491,7 @@ export const useFilesStore = defineStore('files', () => {
     if (previewFile.value && isAffected(previewFile.value.path, entry.path, entry.isDir)) {
       previewFile.value = null
     }
-    if (editingFile.value && isAffected(editingFile.value.path, entry.path, entry.isDir)) {
-      editingFile.value = null
-    }
+    closeEditorTabsAffectedBy(entry.path, entry.isDir)
     await fetchEntries(undefined)
   }
 
@@ -403,9 +504,7 @@ export const useFilesStore = defineStore('files', () => {
     if (previewFile.value && isAffected(previewFile.value.path, entry.path, entry.isDir)) {
       previewFile.value = null
     }
-    if (editingFile.value && isAffected(editingFile.value.path, entry.path, entry.isDir)) {
-      editingFile.value = null
-    }
+    remapEditorTabsAfterRename(entry.path, newPath, entry.isDir)
     await fetchEntries(undefined)
   }
 
@@ -447,10 +546,11 @@ export const useFilesStore = defineStore('files', () => {
 
   return {
     currentPath, currentProfile, currentWorkspaceSessionId, currentWorkspaceRoomId, entries, loading, sortBy, sortOrder,
-    editingFile, previewFile,
-    pathSegments, sortedEntries, hasUnsavedChanges,
-    fetchEntries, listEntries, fetchDirectory, navigateTo, navigateUp,
-    openEditor, openSessionWorkspaceEditor, openGroupWorkspaceEditor, saveEditor, closeEditor,
+    editingFile, editorTabs, activeEditorTabKey, previewFile,
+    pathSegments, sortedEntries, hasUnsavedChanges, hasAnyUnsavedChanges,
+    fetchEntries, clearWorkspaceScope, listEntries, fetchDirectory, navigateTo, navigateUp,
+    openEditor, openEditorTab, editorTabKey, activateEditorTab, closeEditorTab, closeAllEditorTabs, editorTabHasUnsavedChanges,
+    openSessionWorkspaceEditor, openGroupWorkspaceEditor, saveEditor, closeEditor,
     openPreview, openSessionWorkspacePreview, openGroupWorkspacePreview, openRemotePreview, closePreview,
     createDir, createFile, deleteEntry, renameEntry, copyEntry,
     uploadFiles, setSort,

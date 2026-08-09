@@ -18,6 +18,7 @@ import GroupChatInput from './GroupChatInput.vue'
 import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
+import PageSidebarResizeHandle from '@/components/layout/PageSidebarResizeHandle.vue'
 import SettingsCircuitBadge from '@/components/layout/SettingsCircuitBadge.vue'
 import { copyToClipboard } from '@/utils/clipboard'
 import type { Attachment } from '@/stores/hermes/chat'
@@ -1563,6 +1564,11 @@ async function handleClarify(response?: string) {
                 <SettingsCircuitBadge />
             </div>
         </div>
+        <PageSidebarResizeHandle
+            v-if="!props.standalone && showSidebar"
+            :offset="12"
+            :label="t('chat.resizeSidebar')"
+        />
 
         <NDropdown
             v-if="!props.standalone"
@@ -2814,7 +2820,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 // ─── Room Sidebar ────────────────────────────────────────
 
 .room-sidebar {
-    width: $sidebar-width;
+    width: var(--page-sidebar-width, #{$sidebar-width});
     min-height: 0;
     align-self: stretch;
     margin: 10px;
@@ -4212,6 +4218,7 @@ export default defineComponent({ components: { CreateRoomForm } })
         top: 10px;
         bottom: 10px;
         height: auto;
+        width: $sidebar-width;
         margin: 0;
         z-index: 100;
     }

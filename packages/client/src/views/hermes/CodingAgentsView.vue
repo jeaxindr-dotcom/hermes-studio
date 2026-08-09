@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { NAlert, NButton, NForm, NFormItem, NInput, NModal, NRadioButton, NRadioGroup, NSelect, NSpace, NSpin, NTag, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   deleteCodingAgent,
   fetchCodingAgentsStatus,
@@ -46,6 +47,7 @@ type ConfigEditorState = {
 }
 
 const { t } = useI18n()
+const route = useRoute()
 const message = useMessage()
 const profilesStore = useProfilesStore()
 const loading = ref(false)
@@ -137,7 +139,15 @@ const statusById = computed(() => {
   }, {} as Partial<Record<CodingAgentId, CodingAgentToolStatus>>)
 })
 
-const activeProfileName = computed(() => profilesStore.activeProfileName || 'default')
+const routeProfile = computed(() => {
+  const value = Array.isArray(route.query.profile) ? route.query.profile[0] : route.query.profile
+  return String(value || '').trim()
+})
+const launchWorkspaceSessionId = computed(() => {
+  const value = Array.isArray(route.query.workspaceSessionId) ? route.query.workspaceSessionId[0] : route.query.workspaceSessionId
+  return String(value || '').trim() || null
+})
+const activeProfileName = computed(() => routeProfile.value || profilesStore.activeProfileName || 'default')
 
 function isCodingAgentAuthProvider(provider: AvailableModelGroup) {
   return isAuthModelProvider(provider.provider)
@@ -304,12 +314,14 @@ function currentLaunchRequest() {
     return {
       mode: 'global' as const,
       profile: activeProfileName.value,
+      workspaceSessionId: launchWorkspaceSessionId.value,
     }
   }
   const provider = selectedLaunchProvider.value
   return {
     mode: 'scoped' as const,
     profile: activeProfileName.value,
+    workspaceSessionId: launchWorkspaceSessionId.value,
     provider: launchProvider.value,
     model: launchModel.value,
     baseUrl: provider?.base_url || '',

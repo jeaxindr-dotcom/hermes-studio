@@ -19,7 +19,12 @@ const { t } = useI18n()
 const message = useMessage()
 const dialogApi = useDialog()
 const filesStore = useFilesStore()
-const props = defineProps<{ customClose?: () => void }>()
+const props = withDefaults(defineProps<{
+  customClose?: () => void
+  compact?: boolean
+}>(), {
+  compact: false,
+})
 
 const editorContainer = ref<HTMLElement | null>(null)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
@@ -93,7 +98,7 @@ function handleClose() {
 
 <template>
   <div class="file-editor">
-    <div class="editor-header">
+    <div v-if="!props.compact" class="editor-header">
       <span class="editor-filename">{{ filesStore.editingFile?.path }}</span>
       <NSpace>
         <NButton size="small" type="primary" :loading="saving" @click="handleSave">

@@ -11,6 +11,7 @@ import { copyToClipboard } from '@/utils/clipboard'
 import { playCompletionSound } from '@/utils/completion-sound'
 import { showSystemNotification } from '@/utils/completion-notification'
 import { workflowApprovalKey } from '@/utils/workflow-approval-key'
+import { visibleChatSessionIds } from '@/utils/hermes/chat-surface-visibility'
 import { approveWorkflowNode, type WorkflowRecord } from '@/api/hermes/workflows'
 import { listWorkflowsSocket, onWorkflowStatusUpdated, subscribeWorkflowStatuses, disconnectWorkflowSocket, type WorkflowRuntimeStatus } from '@/api/hermes/workflow-socket'
 
@@ -155,11 +156,11 @@ function pendingActions(suppressVisibleSources = true): GlobalPendingAction[] {
     : null
   const visibleGroupRoomId = suppressVisibleSources && route.name === 'hermes.groupChatRoom' ? groupChatStore.currentRoomId : null
   for (const pending of chatStore.pendingApprovals.values()) {
-    if (pending.sessionId === visibleChatSessionId) continue
+    if (pending.sessionId === visibleChatSessionId || (suppressVisibleSources && visibleChatSessionIds.has(pending.sessionId))) continue
     actions.push({ key: `chat-approval:${pending.sessionId}:${pending.approvalId}`, profile, kind: 'chat-approval', title: sessionTitle(pending.sessionId), pending })
   }
   for (const pending of chatStore.pendingClarifies.values()) {
-    if (pending.sessionId === visibleChatSessionId) continue
+    if (pending.sessionId === visibleChatSessionId || (suppressVisibleSources && visibleChatSessionIds.has(pending.sessionId))) continue
     actions.push({ key: `chat-clarify:${pending.sessionId}:${pending.clarifyId}`, profile, kind: 'chat-clarify', title: sessionTitle(pending.sessionId), pending })
   }
   for (const pending of groupChatStore.pendingApprovals.values()) {

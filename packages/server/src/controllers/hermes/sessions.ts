@@ -1,5 +1,6 @@
 import * as hermesCli from '../../services/hermes/hermes-cli'
 import { listSessionSummaries, listSessionSummaryGroups, getUsageStatsFromDb, getSessionDetailFromDb, getSessionDetailFromDbWithProfile, getSessionDetailPaginatedFromDbWithProfile, getExactSessionDetailFromDbWithProfile } from '../../db/hermes/sessions-db'
+import { getPersistedSessionActivity } from '../../db/hermes/session-activity-db'
 import {
   listSessions as localListSessions,
   searchSessions as localSearchSessions,
@@ -77,6 +78,30 @@ function filterArchivedSessions<T extends { is_archived?: number | boolean | nul
 function requestedProfile(ctx: any): string | undefined {
   const value = ctx.state?.profile?.name || (typeof ctx.query?.profile === 'string' ? ctx.query.profile.trim() : '')
   return value || undefined
+}
+
+export async function getSessionActivity(ctx: any) {
+  try {
+    const session = localGetSession(ctx.params.id)
+    if (!session) {
+      ctx.status = 404
+      ctx.body = { error: 'Session not found' }
+      return
+    }
+    if (denySessionAccess(ctx, session)) return
+    const profile = String(session.profile || 'default')
+    const explicitProfile = typeof ctx.query?.profile === 'string' ? ctx.query.profile.trim() : ''
+    if (explicitProfile && explicitProfile !== profile) {
+      ctx.status = 400
+      ctx.body = { error: 'Session profile does not match the requested profile' }
+      return
+    }
+    ctx.body = await getPersistedSessionActivity(ctx.params.id, profile)
+  } catch (err: any) {
+    logger.warn(err, '[sessions] failed to load persisted session activity')
+    ctx.status = 500
+    ctx.body = { error: err?.message || 'Failed to load session activity' }
+  }
 }
 
 function runtimeProvider(provider: string): string {

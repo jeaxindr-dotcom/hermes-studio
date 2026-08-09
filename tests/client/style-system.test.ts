@@ -4,6 +4,58 @@ import { describe, expect, it } from 'vitest'
 const readClientFile = (path: string) => readFileSync(`packages/client/src/${path}`, 'utf8')
 
 describe('client style system', () => {
+  it('keeps the expanded Discussion activity area vertically wheel-scrollable', () => {
+    const chatPanel = readClientFile('components/hermes/chat/ChatPanel.vue')
+    const codeWorkspace = readClientFile('views/hermes/CodeWorkspaceView.vue')
+
+    expect(chatPanel).toMatch(/\.page-sidebar-top\s*\{[\s\S]*min-height:\s*0;[\s\S]*max-height:[^;]+;[\s\S]*overflow-y:\s*auto;[\s\S]*overscroll-behavior:\s*contain;/)
+    expect(codeWorkspace).toMatch(/\.code-page-sidebar-nav\s*\{[\s\S]*min-height:\s*0;[\s\S]*overflow-y:\s*auto;/)
+  })
+
+  it('makes the Discussion sidebar pointer-resizable and persists its width', () => {
+    const chatPanel = readClientFile('components/hermes/chat/ChatPanel.vue')
+
+    expect(chatPanel).toContain('readPageSidebarWidth')
+    expect(chatPanel).toContain('const pageSidebarWidth = ref(readPageSidebarWidth')
+    expect(chatPanel).toContain('class="session-list-resize-handle"')
+    expect(chatPanel).toContain('role="separator"')
+    expect(chatPanel).toContain('@pointerdown="startPageSidebarResize"')
+    expect(chatPanel).toContain('persistStoredPageSidebarWidth(pageSidebarWidth.value, window.localStorage)')
+    expect(chatPanel).toMatch(/\.session-list-resize-handle\s*\{[\s\S]*cursor:\s*col-resize;/)
+  })
+
+  it('adds the shared persisted resize handle to all four page tabs', () => {
+    const groupChat = readClientFile('components/hermes/group-chat/GroupChatPanel.vue')
+    const workflow = readClientFile('views/hermes/WorkflowView.vue')
+    const code = readClientFile('views/hermes/CodeWorkspaceView.vue')
+    const resizeHandle = readClientFile('components/layout/PageSidebarResizeHandle.vue')
+    const widthUtility = readClientFile('utils/page-sidebar-width.ts')
+
+    for (const source of [groupChat, workflow, code]) {
+      expect(source).toContain('PageSidebarResizeHandle')
+      expect(source).toContain(":label=\"t('chat.resizeSidebar')\"")
+      expect(source).toContain('var(--page-sidebar-width')
+    }
+    expect(widthUtility).toContain("export const PAGE_SIDEBAR_WIDTH_STORAGE_KEY = 'hermes.pageSidebarWidth'")
+    expect(resizeHandle).toContain('persistStoredPageSidebarWidth(pageSidebarWidth.value, window.localStorage)')
+    expect(resizeHandle).toContain('@pointerdown="startResize"')
+    expect(resizeHandle).toContain('@dblclick="resetWidth"')
+  })
+
+  it('captures native sidebar wheel events and routes activity scrolling to the active panel', () => {
+    const chatPanel = readClientFile('components/hermes/chat/ChatPanel.vue')
+    const app = readClientFile('App.vue')
+
+    expect(chatPanel).toContain('@wheel.capture="handlePageSidebarWheel"')
+    expect(chatPanel).toContain('target.closest(".session-activity-panel")')
+    expect(chatPanel).toContain('element.scrollTop = nextScrollTop')
+    expect(chatPanel).toContain('event.stopPropagation()')
+    expect(app).toContain(':deep(.chat-panel > .session-list > .page-sidebar-top .session-activity-panel *)')
+    expect(app).toContain(':deep(.group-chat-panel > .room-sidebar > .sidebar-header .session-activity-panel *)')
+    expect(app).toContain(':deep(.workflow-view > .workflow-sidebar > .page-sidebar-top .session-activity-panel *)')
+    expect(app).toContain('-webkit-app-region: no-drag;')
+  })
+
   it('keeps shared page headers on one layout baseline', () => {
     const globalStyles = readClientFile('styles/global.scss')
 
@@ -87,14 +139,27 @@ describe('client style system', () => {
     expect(historyMessageList).toContain('animation: history-message-surface-fade-in 1.5s ease both;')
   })
 
-  it('keeps the three-way conversation switch active state visible in dark mode', () => {
+  it('keeps the four-way conversation switch active state visible in dark mode', () => {
     const pageSidebarNav = readClientFile('components/layout/PageSidebarNav.vue')
 
     expect(pageSidebarNav).toContain(
-      ':global(.dark .conversation-switch--three .conversation-switch-tab.active)',
+      ':global(.dark .conversation-switch--four .conversation-switch-tab.active)',
     )
     expect(pageSidebarNav).toContain('background: $bg-card-hover;')
     expect(pageSidebarNav).toContain('inset 0 0 0 1px $border-color')
+  })
+
+  it('keeps the Code workbench below the Windows desktop titlebar', () => {
+    const app = readClientFile('App.vue')
+
+    expect(app).toMatch(
+      /\.app-shell\.desktop-platform-win32\s*\{[\s\S]*:deep\(\.code-workspace > \.code-workbench\)[\s\S]*margin-top: 50px;/,
+    )
+    expect(app).toMatch(
+      /\.app-shell\.desktop-platform-win32\s*\{[\s\S]*:deep\(\.code-workspace > \.code-assistant-dock\)[\s\S]*margin-top: 50px;/,
+    )
+    expect(app).toContain('PAGE_SIDEBAR_WIDTH_CHANGED_EVENT')
+    expect(app).toContain('pageSidebarWidth.value)) + 20')
   })
 
   it('keeps the coding agents page aligned with the app main surface', () => {

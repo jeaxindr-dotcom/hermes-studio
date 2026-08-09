@@ -125,16 +125,48 @@ function handleScroll() {
   if (scrollTop.value <= props.topThreshold) emit("topReach");
 }
 
+function wheelDeltaPixels(event: WheelEvent, viewport: HTMLElement): number {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * viewport.clientHeight;
+  return event.deltaY;
+}
+
+function nestedTargetCanScroll(target: EventTarget | null, root: HTMLElement, delta: number): boolean {
+  let element = target instanceof HTMLElement ? target : null;
+  while (element && element !== root) {
+    const overflowY = getComputedStyle(element).overflowY;
+    const scrollable = /^(auto|scroll|overlay)$/.test(overflowY)
+      && element.scrollHeight > element.clientHeight + 1;
+    if (scrollable) {
+      if (delta < 0 && element.scrollTop > 0) return true;
+      if (delta > 0 && element.scrollTop + element.clientHeight < element.scrollHeight - 1) return true;
+    }
+    element = element.parentElement;
+  }
+  return false;
+}
+
 function handleWheel(event: WheelEvent) {
-  if (event.deltaY < -1) {
+  const el = getScrollerElement();
+  if (!el || event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  const delta = wheelDeltaPixels(event, el);
+  if (delta < -1) {
     userDetachedFromBottom = true;
     cancelBottomScroll();
   }
+  if (!delta || nestedTargetCanScroll(event.target, el, delta)) return;
+
+  const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+  const nextScrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop + delta));
+  if (Math.abs(nextScrollTop - el.scrollTop) < 1) return;
+  event.preventDefault();
+  el.scrollTop = nextScrollTop;
+  handleScroll();
 }
 
 function handleResize() {
   syncViewport();
-  if (!userDetachedFromBottom || Date.now() < keepBottomUntil || isNearBottom(64)) {
+  if (!userDetachedFromBottom || Date.now() < keepBottomUntil) {
     scheduleScrollToBottom(2);
   }
   if (activeAnchorTarget) scheduleAnchorAlignment(activeAnchorTarget.token, 4);
@@ -527,7 +559,7 @@ defineExpose({
       :flow-mode="true"
       :prerender="overscan"
       @scroll.passive="handleScroll"
-      @wheel.passive="handleWheel"
+      @wheel="handleWheel"
       @resize="handleResize"
       @visible="syncViewport"
     >
@@ -554,7 +586,7 @@ defineExpose({
       v-else
       class="virtual-message-list"
       @scroll.passive="handleScroll"
-      @wheel.passive="handleWheel"
+      @wheel="handleWheel"
     >
       <div ref="contentRef" class="virtual-message-list-content">
         <slot v-if="messages.length > 0" name="before" />

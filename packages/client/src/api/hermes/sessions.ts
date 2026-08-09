@@ -69,6 +69,43 @@ export interface SessionContext {
   message_count: number
 }
 
+export interface PersistedSessionActivity {
+  sessionId: string
+  todo: {
+    items: Array<{
+      id: string
+      content: string
+      status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+    }>
+    updatedAt: number
+  } | null
+  streams: Array<{
+    sessionId: string
+    subagentId: string
+    taskIndex: number
+    taskCount: number
+    goal?: string
+    model?: string
+    status: 'running' | 'completed' | 'failed' | 'error' | 'cancelled' | 'interrupted'
+    startedAt: number
+    updatedAt: number
+    completedAt?: number
+    durationSeconds?: number
+    toolCount?: number
+    apiCalls?: number
+    inputTokens?: number
+    outputTokens?: number
+    summary?: string
+    entries: Array<{
+      id: string
+      kind: 'text' | 'status'
+      timestamp: number
+      text?: string
+      status?: 'running' | 'completed' | 'failed' | 'error' | 'cancelled' | 'interrupted' | 'started'
+    }>
+  }>
+}
+
 export interface PaginatedSessionMessages {
   session: SessionSummary
   messages: HermesMessage[]
@@ -403,6 +440,22 @@ export async function fetchSessionContext(id: string, profile?: string | null): 
     if (profile) params.set('profile', profile)
     const query = params.toString()
     return await request<SessionContext>(`/api/hermes/sessions/${encodeURIComponent(id)}/context${query ? `?${query}` : ''}`)
+  } catch {
+    return null
+  }
+}
+
+export async function fetchPersistedSessionActivity(
+  id: string,
+  profile?: string | null,
+): Promise<PersistedSessionActivity | null> {
+  try {
+    const params = new URLSearchParams()
+    if (profile) params.set('profile', profile)
+    const query = params.toString()
+    return await request<PersistedSessionActivity>(
+      `/api/hermes/sessions/${encodeURIComponent(id)}/activity${query ? `?${query}` : ''}`,
+    )
   } catch {
     return null
   }

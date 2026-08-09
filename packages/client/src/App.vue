@@ -12,6 +12,13 @@ import AuthEventListener from '@/components/auth/AuthEventListener.vue'
 import { desktopBridge } from '@/utils/desktop-bridge'
 import { naiveLocaleFor } from '@/constants/naiveLocale'
 import { naiveRtlFor } from '@/constants/naiveRtl'
+import {
+  emitPageSidebarWidthChanged,
+  PAGE_SIDEBAR_WIDTH_CHANGED_EVENT,
+  PAGE_SIDEBAR_MAX_WIDTH,
+  PAGE_SIDEBAR_MIN_WIDTH,
+  readPageSidebarWidth,
+} from '@/utils/page-sidebar-width'
 
 const AppSidebar = defineAsyncComponent(async () => (await import('@/components/layout/AppSidebar.vue')).default)
 const DesktopTitleBar = defineAsyncComponent(async () => (await import('@/components/layout/DesktopTitleBar.vue')).default)
@@ -44,7 +51,7 @@ const isLoginPage = computed(() => route.name === 'login')
 const isStandaloneChatPage = computed(() => route.meta?.standaloneChat === true)
 const isInviteOnlyPage = computed(() => route.meta?.inviteOnly === true)
 const usesPageSidebar = computed(() =>
-  ['hermes.chat', 'hermes.session', 'hermes.history', 'hermes.historySession', 'hermes.globalAgent', 'hermes.globalAgentSession', 'hermes.groupChat', 'hermes.groupChatRoom', 'hermes.workflow'].includes(route.name as string),
+  ['hermes.chat', 'hermes.session', 'hermes.history', 'hermes.historySession', 'hermes.globalAgent', 'hermes.globalAgentSession', 'hermes.groupChat', 'hermes.groupChatRoom', 'hermes.workflow', 'hermes.code'].includes(route.name as string),
 )
 const showAppSidebar = computed(() => !isLoginPage.value && !isStandaloneChatPage.value && !usesPageSidebar.value)
 const showMobileMenuButton = computed(() => !isLoginPage.value && !isStandaloneChatPage.value && (showAppSidebar.value || usesPageSidebar.value))
@@ -60,16 +67,25 @@ const desktopPlatform = computed(() => desktopBridge()?.platform || '')
 const isDesktopWindows = computed(() => isDesktopShell.value && desktopPlatform.value === 'win32')
 const isDesktopChatWindow = computed(() => desktopBridge()?.windowKind === 'chat')
 const showDesktopTitleBar = computed(() => isDesktopWindows.value && !isDesktopChatWindow.value)
+const pageSidebarWidth = ref(readPageSidebarWidth(typeof window !== 'undefined' ? window.localStorage : null))
 const desktopTitleBarLeft = computed(() => {
   if (isLoginPage.value) return 10
   if (showAppSidebar.value) return appStore.sidebarCollapsed ? 84 : 260
-  return appStore.pageSidebarExpanded ? 260 : 10
+  return appStore.pageSidebarExpanded
+    ? Math.min(PAGE_SIDEBAR_MAX_WIDTH, Math.max(PAGE_SIDEBAR_MIN_WIDTH, pageSidebarWidth.value)) + 20
+    : 10
 })
 const isDesktopPetRoute = computed(() => route.name === 'desktop.pet')
 const showWebPet = computed(() => !isLoginPage.value && !isStandaloneChatPage.value && !isDesktopShell.value && !isDesktopPetRoute.value)
 const desktopPlatformClass = computed(() => desktopPlatform.value ? `desktop-platform-${desktopPlatform.value}` : '')
 const isDesktopWindowMaximized = ref(false)
 let stopWindowStateListener: (() => void) | undefined
+
+function handlePageSidebarWidthChanged(event: Event) {
+  const width = (event as CustomEvent<{ width?: unknown }>).detail?.width
+  if (typeof width !== 'number' || !Number.isFinite(width)) return
+  pageSidebarWidth.value = Math.min(PAGE_SIDEBAR_MAX_WIDTH, Math.max(PAGE_SIDEBAR_MIN_WIDTH, Math.round(width)))
+}
 
 function handleMobileMenuClick() {
   if (usesPageSidebar.value) {
@@ -91,6 +107,8 @@ watch([isLoginPage, isInviteOnlyPage], ([loginPage, inviteOnlyPage]) => {
 })
 
 onMounted(() => {
+  window.addEventListener(PAGE_SIDEBAR_WIDTH_CHANGED_EVENT, handlePageSidebarWidthChanged)
+  emitPageSidebarWidthChanged(pageSidebarWidth.value)
   if (!isInviteOnlyPage.value) {
     void syncThemeFromServer().catch(() => undefined)
   }
@@ -107,6 +125,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener(PAGE_SIDEBAR_WIDTH_CHANGED_EVENT, handlePageSidebarWidthChanged)
   stopWindowStateListener?.()
   appStore.stopHealthPolling()
 })
@@ -256,6 +275,7 @@ useKeyboard()
   :deep(.history-panel),
   :deep(.group-chat-panel),
   :deep(.workflow-view),
+  :deep(.code-workspace),
   :deep(.petdex-view) {
     background-color: transparent;
   }
@@ -264,14 +284,16 @@ useKeyboard()
   :deep(.chat-panel > .session-list),
   :deep(.history-panel > .session-list),
   :deep(.group-chat-panel > .room-sidebar),
-  :deep(.workflow-view > .workflow-sidebar) {
+  :deep(.workflow-view > .workflow-sidebar),
+  :deep(.code-workspace > .code-page-sidebar) {
     background-color: rgba(var(--bg-sidebar-surface-rgb), 0.72);
     -webkit-backdrop-filter: blur(8px) saturate(110%);
     backdrop-filter: blur(8px) saturate(110%);
   }
 
   :deep(.history-panel > .chat-main),
-  :deep(.workflow-view > .workflow-main) {
+  :deep(.workflow-view > .workflow-main),
+  :deep(.code-workspace > .code-workbench) {
     background-color: rgba(var(--bg-main-surface-rgb), 0.72);
     -webkit-backdrop-filter: blur(8px) saturate(110%);
     backdrop-filter: blur(8px) saturate(110%);
@@ -361,6 +383,8 @@ useKeyboard()
   :deep(.chat-panel > .chat-main),
   :deep(.history-panel > .chat-main),
   :deep(.workflow-view > .workflow-main),
+  :deep(.code-workspace > .code-workbench),
+  :deep(.code-workspace > .code-assistant-dock),
   :deep(.group-chat-panel > .chat-main) {
     margin-top: 50px;
   }
@@ -381,6 +405,17 @@ useKeyboard()
     .n-base-selection {
       -webkit-app-region: no-drag;
     }
+  }
+
+  :deep(.chat-panel > .session-list > .page-sidebar-top .session-activity-panel),
+  :deep(.chat-panel > .session-list > .page-sidebar-top .session-activity-panel *),
+  :deep(.history-panel > .session-list > .page-sidebar-top .session-activity-panel),
+  :deep(.history-panel > .session-list > .page-sidebar-top .session-activity-panel *),
+  :deep(.group-chat-panel > .room-sidebar > .sidebar-header .session-activity-panel),
+  :deep(.group-chat-panel > .room-sidebar > .sidebar-header .session-activity-panel *),
+  :deep(.workflow-view > .workflow-sidebar > .page-sidebar-top .session-activity-panel),
+  :deep(.workflow-view > .workflow-sidebar > .page-sidebar-top .session-activity-panel *) {
+    -webkit-app-region: no-drag;
   }
 
 }

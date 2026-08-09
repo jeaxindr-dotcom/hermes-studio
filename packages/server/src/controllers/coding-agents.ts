@@ -1,4 +1,5 @@
 import type { Context } from 'koa'
+import { realpath, stat } from 'fs/promises'
 import {
   deleteCodingAgent,
   getCodingAgentsStatus,
@@ -12,6 +13,8 @@ import {
   writeCodingAgentConfigFile,
   type CodingAgentConfigScope,
 } from '../services/coding-agents'
+import { getSession } from '../db/hermes/session-store'
+import { listUserProfiles } from '../db/hermes/users-store'
 
 function configScope(ctx: Context): CodingAgentConfigScope {
   const body = ctx.request.body as { profile?: unknown; provider?: unknown } | undefined
@@ -19,6 +22,34 @@ function configScope(ctx: Context): CodingAgentConfigScope {
     profile: ctx.state.profile?.name || (typeof ctx.query.profile === 'string' ? ctx.query.profile : '') || (typeof body?.profile === 'string' ? body.profile : ''),
     provider: (typeof ctx.query.provider === 'string' ? ctx.query.provider : '') || (typeof body?.provider === 'string' ? body.provider : ''),
   }
+}
+
+type WorkspaceLaunchBody = {
+  profile?: string
+  workspaceSessionId?: string | null
+}
+
+async function authorizedLaunchScope(ctx: Context, body: WorkspaceLaunchBody): Promise<{ profile?: string; workspace?: string }> {
+  const workspaceSessionId = String(body.workspaceSessionId || '').trim()
+  if (!workspaceSessionId) return { profile: ctx.state.profile?.name || body.profile }
+
+  const session = getSession(workspaceSessionId)
+  if (!session) throw Object.assign(new Error('Workspace session not found'), { status: 404 })
+  const profile = String(session.profile || 'default')
+  const user = ctx.state.user
+  if (user && user.role !== 'super_admin') {
+    const allowedProfiles = new Set(listUserProfiles(user.id).map(item => item.profile_name))
+    if (!allowedProfiles.has(profile)) {
+      throw Object.assign(new Error(`Profile "${profile}" is not available for this user`), { status: 403 })
+    }
+  }
+
+  const rawWorkspace = String(session.workspace || '').trim()
+  if (!rawWorkspace) throw Object.assign(new Error('Session workspace not found'), { status: 404 })
+  const workspace = await realpath(rawWorkspace)
+  const info = await stat(workspace)
+  if (!info.isDirectory()) throw Object.assign(new Error('Session workspace is not a directory'), { status: 400 })
+  return { profile, workspace }
 }
 
 export async function status(ctx: Context) {
@@ -74,15 +105,18 @@ export async function prepareLaunch(ctx: Context) {
     const body = ctx.request.body as {
       mode?: any
       profile?: string
+      workspaceSessionId?: string | null
       provider?: string
       model?: string
       baseUrl?: string
       apiKey?: string
       apiMode?: any
     }
+    const launchScope = await authorizedLaunchScope(ctx, body)
     ctx.body = await prepareCodingAgentLaunch(ctx.params.id, {
       mode: body.mode,
-      profile: ctx.state.profile?.name || body.profile,
+      profile: launchScope.profile,
+      workspace: launchScope.workspace,
       provider: body.provider,
       model: body.model,
       baseUrl: body.baseUrl,
@@ -100,15 +134,18 @@ export async function nativeLaunch(ctx: Context) {
     const body = ctx.request.body as {
       mode?: any
       profile?: string
+      workspaceSessionId?: string | null
       provider?: string
       model?: string
       baseUrl?: string
       apiKey?: string
       apiMode?: any
     }
+    const launchScope = await authorizedLaunchScope(ctx, body)
     ctx.body = await openCodingAgentNativeTerminal(ctx.params.id, {
       mode: body.mode,
-      profile: ctx.state.profile?.name || body.profile,
+      profile: launchScope.profile,
+      workspace: launchScope.workspace,
       provider: body.provider,
       model: body.model,
       baseUrl: body.baseUrl,
@@ -127,16 +164,19 @@ export async function startRun(ctx: Context) {
       sessionId?: string
       mode?: any
       profile?: string
+      workspaceSessionId?: string | null
       provider?: string
       model?: string
       baseUrl?: string
       apiKey?: string
       apiMode?: any
     }
+    const launchScope = await authorizedLaunchScope(ctx, body)
     ctx.body = await startCodingAgentRun(ctx.params.id, {
       sessionId: String(body.sessionId || ''),
       mode: body.mode,
-      profile: ctx.state.profile?.name || body.profile,
+      profile: launchScope.profile,
+      workspace: launchScope.workspace,
       provider: body.provider,
       model: body.model,
       baseUrl: body.baseUrl,

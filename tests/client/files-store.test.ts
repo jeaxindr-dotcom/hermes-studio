@@ -209,6 +209,62 @@ describe('files store', () => {
     })
   })
 
+  it('preserves unsaved Monaco tab content while switching files and clears tabs on workspace change', async () => {
+    mockSessionsApi.listSessionWorkspaceFiles.mockResolvedValue({ entries: [], path: '' })
+    mockSessionsApi.readSessionWorkspaceFile
+      .mockResolvedValueOnce({ path: 'src/alpha.ts', content: 'export const alpha = 1' })
+      .mockResolvedValueOnce({ path: 'src/beta.ts', content: 'export const beta = 2' })
+
+    const store = useFilesStore()
+    await store.fetchEntries('', { workspaceSessionId: 'session-1' })
+    await store.openEditorTab('src/alpha.ts')
+    store.editingFile!.content = 'export const alpha = 42'
+    await store.openEditorTab('src/beta.ts')
+
+    expect(store.editorTabs).toHaveLength(2)
+    expect(store.editorTabHasUnsavedChanges(store.editorTabs[0])).toBe(true)
+    expect(store.activateEditorTab('session:session-1:src/alpha.ts')).toBe(true)
+    expect(store.editingFile?.content).toBe('export const alpha = 42')
+
+    await expect(store.fetchEntries('', { workspaceSessionId: 'session-2' })).rejects.toMatchObject({
+      code: 'unsaved_editor_changes',
+    })
+    expect(store.currentWorkspaceSessionId).toBe('session-1')
+    expect(store.editorTabs).toHaveLength(2)
+
+    await store.fetchEntries('', { workspaceSessionId: 'session-2', discardUnsavedChanges: true })
+    expect(store.editorTabs).toHaveLength(0)
+    expect(store.editingFile).toBeNull()
+  })
+
+  it('keeps editor tabs coherent when workspace files are renamed or deleted', async () => {
+    mockSessionsApi.listSessionWorkspaceFiles.mockResolvedValue({ entries: [], path: '' })
+    mockSessionsApi.readSessionWorkspaceFile
+      .mockResolvedValueOnce({ path: 'src/alpha.ts', content: 'export const alpha = 1' })
+      .mockResolvedValueOnce({ path: 'src/beta.ts', content: 'export const beta = 2' })
+    mockSessionsApi.renameSessionWorkspaceFile.mockResolvedValue(undefined)
+    mockSessionsApi.deleteSessionWorkspaceFile.mockResolvedValue(undefined)
+
+    const store = useFilesStore()
+    await store.fetchEntries('', { workspaceSessionId: 'session-1' })
+    await store.openEditorTab('src/alpha.ts')
+    store.editingFile!.content = 'export const alpha = 42'
+    await store.openEditorTab('src/beta.ts')
+
+    await store.renameEntry({
+      name: 'src', path: 'src', isDir: true, size: 0, modTime: '',
+    }, 'source')
+    expect(store.editorTabs.map(tab => tab.path)).toEqual(['source/alpha.ts', 'source/beta.ts'])
+    expect(store.editorTabs[0].content).toBe('export const alpha = 42')
+    expect(store.activateEditorTab('session:session-1:source/alpha.ts')).toBe(true)
+
+    await store.deleteEntry({
+      name: 'alpha.ts', path: 'source/alpha.ts', isDir: false, size: 0, modTime: '',
+    })
+    expect(store.editorTabs.map(tab => tab.path)).toEqual(['source/beta.ts'])
+    expect(store.editingFile?.path).toBe('source/beta.ts')
+  })
+
   it('opens image previews without reading file contents', async () => {
     const store = useFilesStore()
     const entry: FileEntry = {

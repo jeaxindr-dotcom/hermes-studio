@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { canOpenTerminal, resolveTerminalCwd } from '../../packages/server/src/routes/hermes/terminal'
+import { canOpenTerminal, canonicalTerminalWorkspace, resolveTerminalCwd } from '../../packages/server/src/routes/hermes/terminal'
 
 const tmpRoots: string[] = []
 
@@ -32,6 +32,18 @@ describe('terminal cwd resolution', () => {
     const profileDir = makeTmpRoot()
     const cwd = makeTmpRoot()
     expect(resolveTerminalCwd({ cwd }, profileDir)).toBe(cwd)
+  })
+
+  it('canonicalizes a session-derived Code workspace directory', () => {
+    const workspace = makeTmpRoot()
+    expect(canonicalTerminalWorkspace(workspace)).toBe(workspace)
+  })
+
+  it('rejects a session workspace that is not a directory', () => {
+    const root = makeTmpRoot()
+    const file = join(root, 'not-a-directory.txt')
+    writeFileSync(file, 'x')
+    expect(() => canonicalTerminalWorkspace(file)).toThrow('not a directory')
   })
 
   it('falls back to the profile directory when configured cwd is missing', () => {

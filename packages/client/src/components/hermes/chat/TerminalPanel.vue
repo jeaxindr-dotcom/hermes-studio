@@ -12,7 +12,7 @@ import type { ITheme } from "@xterm/xterm";
 const { t } = useI18n();
 const message = useMessage();
 
-const props = defineProps<{ visible?: boolean; initialCommand?: string }>();
+const props = defineProps<{ visible?: boolean; initialCommand?: string; workspaceSessionId?: string | null }>();
 
 // ─── Terminal themes ────────────────────────────────────────────
 
@@ -134,6 +134,10 @@ function formatHostForPort(hostname: string, port: number): string {
 function buildWsUrl(): string {
   const token = getApiKey();
   const base = getBaseUrlValue();
+  const params = new URLSearchParams();
+  if (token) params.set('token', token);
+  if (props.workspaceSessionId?.trim()) params.set('workspaceSessionId', props.workspaceSessionId.trim());
+  const query = params.toString() ? `?${params.toString()}` : '';
   const wsProtocol = base
     ? base.startsWith("https")
       ? "wss:"
@@ -143,14 +147,14 @@ function buildWsUrl(): string {
       : "ws:";
 
   if (base) {
-    return `${wsProtocol}//${new URL(base).host}/api/hermes/terminal${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    return `${wsProtocol}//${new URL(base).host}/api/hermes/terminal${query}`;
   }
 
   const directDevPort = import.meta.env.VITE_HERMES_DIRECT_WS_PORT;
   const host = import.meta.env.DEV && directDevPort
     ? formatHostForPort(location.hostname, Number(directDevPort))
     : location.host;
-  return `${wsProtocol}//${host}/api/hermes/terminal${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  return `${wsProtocol}//${host}/api/hermes/terminal${query}`;
 }
 
 function connect() {

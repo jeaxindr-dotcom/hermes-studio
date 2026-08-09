@@ -58,6 +58,14 @@ import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "
 import { OPEN_SUBAGENT_STREAM_EVENT, type OpenSubagentStreamDetail } from "@/utils/hermes/subagent-stream";
 import { desktopBridge, hasDesktopBrowserBridge } from "@/utils/desktop-bridge";
 import { OPEN_DESKTOP_BROWSER_PANEL_EVENT } from "@/utils/desktop-browser";
+import {
+  emitPageSidebarWidthChanged,
+  PAGE_SIDEBAR_DEFAULT_WIDTH,
+  PAGE_SIDEBAR_MAX_WIDTH,
+  PAGE_SIDEBAR_MIN_WIDTH,
+  persistPageSidebarWidth as persistStoredPageSidebarWidth,
+  readPageSidebarWidth,
+} from "@/utils/page-sidebar-width";
 
 const props = withDefaults(defineProps<{
   standalone?: boolean;
@@ -112,6 +120,8 @@ const TOOL_PANEL_DEFAULT_WIDTH = 560;
 const TOOL_PANEL_STORAGE_KEY = "hermes.chat.toolPanelWidth";
 const toolPanelWidth = ref(loadToolPanelWidth());
 const toolResizeStart = ref<{ x: number; width: number; deltaSign: 1 | -1 } | null>(null);
+const pageSidebarWidth = ref(readPageSidebarWidth(typeof window !== "undefined" ? window.localStorage : null));
+const pageSidebarResizeStart = ref<{ x: number; width: number; deltaSign: 1 | -1 } | null>(null);
 
 const currentMode = ref<"chat" | "live">("chat");
 
@@ -144,6 +154,10 @@ const isMobile = ref(
 const toolPanelStyle = computed(() => ({
   width: isMobile.value ? "100%" : `min(${toolPanelWidth.value}px, 100%)`,
 }));
+const pageSidebarStyle = computed(() => ({
+  "--page-sidebar-width": `${pageSidebarWidth.value}px`,
+}));
+const pageSidebarMaxWidthValue = computed(() => pageSidebarMaxWidth());
 
 function openRealtimeVoice() {
   if (!chatStore.activeSessionId) return;
@@ -234,6 +248,111 @@ function startToolResize(event: PointerEvent) {
   window.addEventListener("pointerup", stopToolResize);
   document.body.style.userSelect = "none";
   document.body.style.cursor = "col-resize";
+}
+
+function pageSidebarMaxWidth() {
+  if (typeof window === "undefined") return PAGE_SIDEBAR_MAX_WIDTH;
+  if (isMobile.value) return PAGE_SIDEBAR_DEFAULT_WIDTH;
+  return Math.max(
+    PAGE_SIDEBAR_MIN_WIDTH,
+    Math.min(
+      PAGE_SIDEBAR_MAX_WIDTH,
+      Math.floor(window.innerWidth * 0.46),
+      window.innerWidth - 420,
+    ),
+  );
+}
+
+function clampPageSidebarWidth(width: number) {
+  return Math.min(
+    pageSidebarMaxWidth(),
+    Math.max(PAGE_SIDEBAR_MIN_WIDTH, Math.round(width)),
+  );
+}
+
+function persistPageSidebarWidth() {
+  if (typeof window === "undefined" || isMobile.value) return;
+  persistStoredPageSidebarWidth(pageSidebarWidth.value, window.localStorage);
+}
+
+function handlePageSidebarViewportResize() {
+  if (isMobile.value) return;
+  pageSidebarWidth.value = clampPageSidebarWidth(pageSidebarWidth.value);
+  emitPageSidebarWidthChanged(pageSidebarWidth.value);
+}
+
+function handlePageSidebarResizeMove(event: PointerEvent) {
+  const start = pageSidebarResizeStart.value;
+  if (!start) return;
+  const delta = (event.clientX - start.x) * start.deltaSign;
+  pageSidebarWidth.value = clampPageSidebarWidth(start.width + delta);
+  emitPageSidebarWidthChanged(pageSidebarWidth.value);
+}
+
+function stopPageSidebarResize() {
+  if (!pageSidebarResizeStart.value) return;
+  pageSidebarResizeStart.value = null;
+  window.removeEventListener("pointermove", handlePageSidebarResizeMove);
+  window.removeEventListener("pointerup", stopPageSidebarResize);
+  persistPageSidebarWidth();
+  document.body.style.userSelect = "";
+  document.body.style.cursor = "";
+}
+
+function startPageSidebarResize(event: PointerEvent) {
+  if (isMobile.value) return;
+  event.preventDefault();
+  pageSidebarResizeStart.value = {
+    x: event.clientX,
+    width: pageSidebarWidth.value,
+    deltaSign: document.documentElement.dir === "rtl" ? -1 : 1,
+  };
+  window.addEventListener("pointermove", handlePageSidebarResizeMove);
+  window.addEventListener("pointerup", stopPageSidebarResize);
+  document.body.style.userSelect = "none";
+  document.body.style.cursor = "col-resize";
+}
+
+function activityWheelDelta(event: WheelEvent, element: HTMLElement): number {
+  if (event.deltaMode === 1) return event.deltaY * 16;
+  if (event.deltaMode === 2) return event.deltaY * element.clientHeight;
+  return event.deltaY;
+}
+
+function handlePageSidebarWheel(event: WheelEvent) {
+  if (event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  const target = event.target;
+  const panel = target instanceof Element
+    ? target.closest(".session-activity-panel")
+    : null;
+  if (!(panel instanceof HTMLElement)) return;
+
+  const element = panel.querySelector<HTMLElement>(".activity-content");
+  if (!element) return;
+  const delta = activityWheelDelta(event, element);
+  const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+  const nextScrollTop = Math.min(maxScrollTop, Math.max(0, element.scrollTop + delta));
+  if (Math.abs(nextScrollTop - element.scrollTop) < 1) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  element.scrollTop = nextScrollTop;
+}
+
+function resetPageSidebarWidth() {
+  pageSidebarWidth.value = clampPageSidebarWidth(PAGE_SIDEBAR_DEFAULT_WIDTH);
+  emitPageSidebarWidthChanged(pageSidebarWidth.value);
+  persistPageSidebarWidth();
+}
+
+function handlePageSidebarResizeKeydown(event: KeyboardEvent) {
+  if (isMobile.value || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+  event.preventDefault();
+  const rtlSign = document.documentElement.dir === "rtl" ? -1 : 1;
+  const direction = event.key === "ArrowRight" ? 1 : -1;
+  pageSidebarWidth.value = clampPageSidebarWidth(pageSidebarWidth.value + (direction * rtlSign * 16));
+  emitPageSidebarWidthChanged(pageSidebarWidth.value);
+  persistPageSidebarWidth();
 }
 
 function closeToolPanelOverlay(): boolean {
@@ -421,7 +540,9 @@ onMounted(() => {
   window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.addEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
   window.addEventListener("resize", handleToolPanelViewportResize);
+  window.addEventListener("resize", handlePageSidebarViewportResize);
   handleToolPanelViewportResize();
+  handlePageSidebarViewportResize();
   if (profilesStore.profiles.length === 0) {
     void profilesStore.fetchProfiles();
   }
@@ -463,7 +584,9 @@ onUnmounted(() => {
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.removeEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
   window.removeEventListener("resize", handleToolPanelViewportResize);
+  window.removeEventListener("resize", handlePageSidebarViewportResize);
   stopToolResize();
+  stopPageSidebarResize();
   sessionFadeAnimation?.cancel();
   if (filesStore.previewFile?.workspaceSessionId) filesStore.closePreview();
   toolPanelStore.closeWorkspaceDiff();
@@ -1840,7 +1963,14 @@ async function handleSessionModelCustomSubmit() {
 </script>
 
 <template>
-  <div class="chat-panel" :class="{ 'chat-panel--standalone': standalone }">
+  <div
+    class="chat-panel"
+    :class="{
+      'chat-panel--standalone': standalone,
+      'chat-panel--resizing-sidebar': pageSidebarResizeStart,
+    }"
+    :style="pageSidebarStyle"
+  >
     <div
       v-if="currentMode === 'chat' && !standalone"
       class="session-backdrop"
@@ -1852,7 +1982,7 @@ async function handleSessionModelCustomSubmit() {
       class="session-list"
       :class="{ collapsed: !showSessions }"
     >
-      <div v-if="showSessions" class="page-sidebar-top">
+      <div v-if="showSessions" class="page-sidebar-top" @wheel.capture="handlePageSidebarWheel">
         <PageSidebarNav
           :active="chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
           :primary-label="t('chat.newChat')"
@@ -2111,6 +2241,20 @@ async function handleSessionModelCustomSubmit() {
         <SettingsCircuitBadge />
       </div>
     </aside>
+    <div
+      v-if="currentMode === 'chat' && !standalone && showSessions && !isMobile"
+      class="session-list-resize-handle"
+      role="separator"
+      aria-orientation="vertical"
+      :aria-label="t('chat.resizeSidebar')"
+      :aria-valuenow="pageSidebarWidth"
+      :aria-valuemin="PAGE_SIDEBAR_MIN_WIDTH"
+      :aria-valuemax="pageSidebarMaxWidthValue"
+      tabindex="0"
+      @pointerdown="startPageSidebarResize"
+      @keydown="handlePageSidebarResizeKeydown"
+      @dblclick="resetPageSidebarWidth"
+    />
 
     <NDropdown
       placement="bottom-start"
@@ -3084,7 +3228,7 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .session-list {
-  width: $sidebar-width;
+  width: var(--page-sidebar-width, #{$sidebar-width});
   min-height: 0;
   align-self: stretch;
   margin: 10px;
@@ -3127,7 +3271,73 @@ async function handleSessionModelCustomSubmit() {
   }
 }
 
+.chat-panel--resizing-sidebar .session-list {
+  transition: none;
+}
+
+.session-list-resize-handle {
+  position: absolute;
+  z-index: 105;
+  inset-inline-start: calc(12px + var(--page-sidebar-width, #{$sidebar-width}));
+  top: 10px;
+  bottom: 10px;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset-inline-start: 4px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: $border-color;
+    transition: background-color $transition-fast;
+  }
+
+  &::before {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    inset-inline-start: -1px;
+    top: 50%;
+    width: 10px;
+    height: 38px;
+    transform: translateY(-50%);
+    border: 1px solid $border-color;
+    border-radius: 6px;
+    background:
+      linear-gradient($text-muted, $text-muted) center 12px / 6px 1px no-repeat,
+      linear-gradient($text-muted, $text-muted) center 19px / 6px 1px no-repeat,
+      linear-gradient($text-muted, $text-muted) center 26px / 6px 1px no-repeat,
+      $bg-card;
+    opacity: 0.88;
+    transition: border-color $transition-fast, opacity $transition-fast;
+  }
+
+  &:hover::after,
+  &:focus-visible::after {
+    background: var(--accent-primary);
+  }
+
+  &:hover::before,
+  &:focus-visible::before {
+    border-color: var(--accent-primary);
+    opacity: 1;
+  }
+
+  &:focus-visible {
+    outline: none;
+  }
+}
+
 @media (max-width: $breakpoint-mobile) {
+  .session-list-resize-handle {
+    display: none;
+  }
+
   .session-close-btn {
     display: flex;
   }
@@ -3149,7 +3359,12 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .page-sidebar-top {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(58%, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   padding: 12px;
   border-bottom: 1px solid $border-color;
 }
