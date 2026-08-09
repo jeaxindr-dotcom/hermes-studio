@@ -143,8 +143,9 @@ export function prepareThreeWayMerge({ repoRoot, ours, theirs, base: requestedBa
   ], { allowFailure: true })
   const parsed = parseMergeTreeOutput(merge.stdout)
   const status = merge.status === 0 ? 'ready' : 'conflict'
-  const generatedTouched = bothTouched.filter(file => pathMatches(file, GENERATED_ARTIFACT_PATHS))
-  const semanticReview = bothTouched.filter(file => pathMatches(file, SEMANTIC_REVIEW_PATHS))
+  const allTouched = [...new Set([...oursFiles, ...theirsFiles])]
+  const generatedTouched = allTouched.filter(file => pathMatches(file, GENERATED_ARTIFACT_PATHS))
+  const semanticReview = allTouched.filter(file => pathMatches(file, SEMANTIC_REVIEW_PATHS))
   const safeToMaterialize = status === 'ready'
   const safeToAutoApply = safeToMaterialize
     && workingTree.length === 0

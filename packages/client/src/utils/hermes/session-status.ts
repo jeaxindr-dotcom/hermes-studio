@@ -13,12 +13,10 @@ export interface SessionStatusSignals {
  * Errors and explicit user interaction requests take precedence over run state.
  */
 export function deriveSessionStatus(signals: SessionStatusSignals): SessionStatus {
-  if (!signals.hasHistory && !signals.hasError && !signals.waitingForUser && !signals.isWorking) {
-    return 'none'
-  }
   if (signals.hasError) return 'error'
   if (signals.waitingForUser) return 'waiting'
   if (signals.isWorking) return 'working'
   if (signals.hasUnreadReply) return 'replied'
+  if (!signals.hasHistory) return 'none'
   return 'finished'
 }

@@ -11,8 +11,7 @@ on:
     - cron: "17 4 * * 1"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: custom-upstream-sync
@@ -32,7 +31,7 @@ jobs:
         with:
           ref: ${{ env.CUSTOM_BRANCH }}
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -76,6 +75,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          custom_base="$(git rev-parse "$CUSTOM_BRANCH")"
+          echo "CUSTOM_BASE=$custom_base" >> "$GITHUB_ENV"
           git merge --no-ff --no-edit "$UPSTREAM_REF"
           echo "CUSTOM_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "UPSTREAM_BASE=$(git merge-base HEAD "$UPSTREAM_REF")" >> "$GITHUB_ENV"
@@ -125,21 +126,66 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Create candidate branch and pull request
+      - name: Export candidate patch
         if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --binary "$CUSTOM_BASE" HEAD > "$RUNNER_TEMP/custom-candidate.patch"
+
+      - name: Upload candidate patch
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-update-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/custom-candidate.patch
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish candidate pull request
+    needs: prepare
+    if: success()
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout custom branch without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          ref: feat/agents-tasks-code-workspace
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download candidate patch
+        uses: actions/download-artifact@v4
+        with:
+          name: custom-update-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/candidate
+
+      - name: Apply candidate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --index "$RUNNER_TEMP/candidate/custom-candidate.patch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          candidate="automation/upstream-sync-${GITHUB_RUN_ID}"
+          git switch -c "$candidate"
+          git commit -m "chore: sync custom Studio fork with upstream" \
+            -m "Prepared and validated in read-only job ${GITHUB_RUN_ID}."
+          echo "CANDIDATE_BRANCH=$candidate" >> "$GITHUB_ENV"
+
+      - name: Push candidate and open pull request
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          candidate="automation/upstream-sync-${GITHUB_RUN_ID}"
-          git switch -c "$candidate"
-          git add -A
-          git commit -m "chore: sync custom Studio fork with upstream" \
-            -m "Upstream commit: $UPSTREAM_COMMIT"
-          git push --set-upstream origin "$candidate"
+          git push --set-upstream origin "$CANDIDATE_BRANCH"
           gh pr create \
-            --base "$CUSTOM_BRANCH" \
-            --head "$candidate" \
+            --base feat/agents-tasks-code-workspace \
+            --head "$CANDIDATE_BRANCH" \
             --title "chore: sync Hermes Studio custom fork with upstream" \
-            --body "Automated three-way sync candidate. Textual merge, focused tests, Web UI build, Desktop typecheck, and custom manifest generation passed. Review semantic changes before merging."
+            --body "Automated three-way sync candidate. The source was merged, built, and tested in a read-only job; review semantic changes before merging."

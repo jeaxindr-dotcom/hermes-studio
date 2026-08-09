@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CUSTOM_UPDATE_FEED_URL: https://github.com/jeaxindr-dotcom/hermes-studio/releases/latest/download
+  CUSTOM_UPDATE_FEED_URL: https://github.com/jeaxindr-dotcom/hermes-studio/releases/download/custom-latest
   CUSTOM_BRANCH: feat/agents-tasks-code-workspace
   UPSTREAM_REPOSITORY: https://github.com/EKKOLearnAI/hermes-studio.git
 
@@ -84,7 +84,7 @@ jobs:
           HERMES_STUDIO_UPSTREAM_COMMIT: ${{ env.UPSTREAM_COMMIT }}
           HERMES_STUDIO_UPSTREAM_BASE: ${{ env.UPSTREAM_BASE }}
           HERMES_STUDIO_CUSTOM_BRANCH: ${{ env.CUSTOM_BRANCH }}
-        run: npm --prefix packages/desktop run dist:win -- --publish never
+        run: npm --prefix packages/desktop run dist:custom-win -- --publish never
 
       - name: Validate custom manifest
         shell: bash
@@ -95,6 +95,13 @@ jobs:
           const path = 'packages/desktop/build/customization-manifest.json'
           if (!existsSync(path)) throw new Error(`Missing ${path}`)
           const manifest = JSON.parse(readFileSync(path, 'utf8'))
+          const packageJson = JSON.parse(readFileSync('packages/desktop/package.json', 'utf8'))
+          const sourceTag = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch'
+            ? '${{ github.event.inputs.tag }}'
+            : process.env.GITHUB_REF_NAME
+          if (sourceTag !== `custom-v${packageJson.version}`) {
+            throw new Error(`Release tag ${sourceTag} does not match desktop version ${packageJson.version}`)
+          }
           if (manifest.variant !== 'hermes-studio-custom') throw new Error('Wrong release variant')
           if (manifest.update?.allowOfficialFallback !== false) throw new Error('Official updater fallback is enabled')
           if (manifest.source?.repository !== 'https://github.com/jeaxindr-dotcom/hermes-studio') throw new Error('Wrong custom source repository')
@@ -105,9 +112,10 @@ jobs:
       - name: Publish custom Windows release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: Hermes Studio Custom ${{ github.event.inputs.tag || github.ref_name }}
-          make_latest: true
+          tag_name: custom-latest
+          name: Hermes Studio Custom (channel)
+          make_latest: false
+          target_commitish: ${{ github.sha }}
           fail_on_unmatched_files: true
           files: |
             packages/desktop/release/*.exe

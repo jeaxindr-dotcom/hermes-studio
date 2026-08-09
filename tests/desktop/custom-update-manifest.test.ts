@@ -30,12 +30,14 @@ function validManifest() {
       repository: UPSTREAM_REPOSITORY,
       baseCommit: upstreamCommit,
     },
+    clientSha256: 'c'.repeat(64),
+    serverSha256: 'd'.repeat(64),
   }
 }
 
 describe('custom update manifest contract', () => {
   it('uses the fork release feed and derives its manifest URL', () => {
-    expect(CUSTOM_UPDATE_FEED_URL).toBe('https://github.com/jeaxindr-dotcom/hermes-studio/releases/latest/download')
+    expect(CUSTOM_UPDATE_FEED_URL).toBe('https://github.com/jeaxindr-dotcom/hermes-studio/releases/download/custom-latest')
     expect(customizationManifestUrl()).toBe(`${CUSTOM_UPDATE_FEED_URL}/customization-manifest.json`)
     expect(CUSTOM_UPDATE_TRUSTED_HOSTS).toEqual(expect.arrayContaining([
       'github.com',

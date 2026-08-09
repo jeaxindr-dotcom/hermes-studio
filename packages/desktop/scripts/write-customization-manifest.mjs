@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { GENERATED_ARTIFACT_PATHS } from '../../../scripts/custom-update-manager.mjs'
 
-const CUSTOM_UPDATE_FEED_URL = 'https://github.com/jeaxindr-dotcom/hermes-studio/releases/latest/download'
+const CUSTOM_UPDATE_FEED_URL = 'https://github.com/jeaxindr-dotcom/hermes-studio/releases/download/custom-latest'
 const CUSTOM_UPDATE_REPOSITORY = 'https://github.com/jeaxindr-dotcom/hermes-studio'
 const UPSTREAM_REPOSITORY = 'https://github.com/EKKOLearnAI/hermes-studio'
 

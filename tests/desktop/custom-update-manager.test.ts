@@ -121,4 +121,35 @@ describe('custom update manager', () => {
       rmSync(fixture.root, { recursive: true, force: true })
     }
   })
+
+  it('blocks automatic application when a generated artifact changes on only one side', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hermes-studio-update-generated-'))
+    try {
+      mkdirSync(join(root, 'packages', 'desktop'), { recursive: true })
+      git(root, 'init', '-q')
+      git(root, 'config', 'user.email', 'test@example.invalid')
+      git(root, 'config', 'user.name', 'Hermes Test')
+      writeFileSync(join(root, 'packages', 'desktop', 'package-lock.json'), '{}\n')
+      writeFileSync(join(root, 'base.txt'), 'base\n')
+      git(root, 'add', '.')
+      git(root, 'commit', '-qm', 'base')
+      const base = git(root, 'rev-parse', 'HEAD')
+      git(root, 'switch', '-qc', 'ours')
+      writeFileSync(join(root, 'packages', 'desktop', 'package-lock.json'), '{"generated":true}\n')
+      git(root, 'commit', '-qam', 'custom generated output')
+      const ours = git(root, 'rev-parse', 'HEAD')
+      git(root, 'switch', '-qc', 'theirs', base)
+      writeFileSync(join(root, 'upstream.txt'), 'upstream\n')
+      git(root, 'add', '.')
+      git(root, 'commit', '-qm', 'upstream source')
+      const theirs = git(root, 'rev-parse', 'HEAD')
+
+      const report = prepareThreeWayMerge({ repoRoot: root, ours, theirs, base })
+      expect(report.status).toBe('ready')
+      expect(report.generatedTouched).toContain('packages/desktop/package-lock.json')
+      expect(report.safeToAutoApply).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })

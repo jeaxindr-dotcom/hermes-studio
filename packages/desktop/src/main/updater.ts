@@ -14,6 +14,10 @@ let initialized = false
 let checking = false
 let downloadedUpdate: UpdateDownloadedEvent | null = null
 let recoveringPendingUpdate = false
+let pendingUpdateValidation: Promise<void> | null = null
+
+const MANIFEST_MAX_BYTES = 1024 * 1024
+const MANIFEST_REQUEST_TIMEOUT_MS = 10_000
 
 const execFileAsync = promisify(execFile)
 
@@ -56,7 +60,13 @@ function fetchJson(url: string, redirectCount = 0): Promise<unknown> {
 
       let body = ''
       response.setEncoding('utf8')
-      response.on('data', chunk => { body += chunk })
+      response.on('data', chunk => {
+        body += chunk
+        if (Buffer.byteLength(body, 'utf8') > MANIFEST_MAX_BYTES) {
+          response.destroy()
+          reject(new Error('Customization manifest is too large.'))
+        }
+      })
       response.on('end', () => {
         if (status < 200 || status >= 300) {
           reject(new Error(`Customization manifest request failed with HTTP ${status}.`))
@@ -68,6 +78,9 @@ function fetchJson(url: string, redirectCount = 0): Promise<unknown> {
           reject(new Error('Customization manifest is not valid JSON.'))
         }
       })
+    })
+    request.setTimeout(MANIFEST_REQUEST_TIMEOUT_MS, () => {
+      request.destroy(new Error('Customization manifest request timed out.'))
     })
     request.on('error', reject)
     request.end()
@@ -234,12 +247,14 @@ export function initAutoUpdater(nextOptions: AutoUpdaterOptions = {}) {
 
   autoUpdater.on('update-available', info => {
     console.log(`[updater] custom update available: ${info.version}`)
-    verifyCustomUpdateManifest(info)
+    pendingUpdateValidation = verifyCustomUpdateManifest(info)
       .then(() => promptDownloadAvailableUpdate(info))
       .catch(err => {
         console.error('[updater] rejected unvalidated custom update:', err)
         if (checking) showUpdateCheckFailed()
+        throw err
       })
+    pendingUpdateValidation.catch(() => undefined)
   })
   autoUpdater.on('update-not-available', info => {
     console.log('[updater] up to date')
@@ -297,10 +312,12 @@ export async function checkForDesktopUpdates(manual: boolean): Promise<void> {
   checking = manual
   try {
     await checkForUpdates()
+    if (pendingUpdateValidation) await pendingUpdateValidation
   } catch (err) {
     if (manual) showUpdateCheckFailed()
     throw err
   } finally {
     checking = false
+    pendingUpdateValidation = null
   }
 }

@@ -26,10 +26,11 @@
     "runtime:asset-name": "node scripts/runtime-asset-name.mjs",
     "prune:python": "node scripts/prune-python.mjs",
     "dev": "npm run build:main && electron .",
-    "dist": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs",
-    "dist:mac": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs --mac",
-    "dist:win": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs --win",
-    "dist:linux": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs --linux"
+    "dist": "node scripts/remove-customization-manifest.mjs && npm run build && node scripts/electron-builder.mjs",
+    "dist:mac": "node scripts/remove-customization-manifest.mjs && npm run build && node scripts/electron-builder.mjs --mac",
+    "dist:win": "node scripts/remove-customization-manifest.mjs && npm run build && node scripts/electron-builder.mjs --win",
+    "dist:linux": "node scripts/remove-customization-manifest.mjs && npm run build && node scripts/electron-builder.mjs --linux",
+    "dist:custom-win": "npm run build && npm run write:customization-manifest && node scripts/electron-builder.mjs --win"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",

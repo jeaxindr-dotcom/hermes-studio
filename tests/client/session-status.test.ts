@@ -26,6 +26,14 @@ describe('session status derivation', () => {
     expect(deriveSessionStatus({ ...base, hasUnreadReply: true })).toBe('replied')
   })
 
+  it('keeps an unread reply visible when history metadata is not loaded yet', () => {
+    expect(deriveSessionStatus({
+      ...base,
+      hasHistory: false,
+      hasUnreadReply: true,
+    })).toBe('replied')
+  })
+
   it('uses purple finished state for an idle non-empty chat', () => {
     expect(deriveSessionStatus(base)).toBe('finished')
   })

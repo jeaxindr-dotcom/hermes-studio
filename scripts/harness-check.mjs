@@ -261,6 +261,7 @@ const desktopPackageRuntime = await readText('packages/desktop/scripts/package-r
 const desktopWebuiServer = await readText('packages/desktop/src/main/webui-server.ts')
 const desktopMain = await readText('packages/desktop/src/main/index.ts')
 const desktopUpdater = await readText('packages/desktop/src/main/updater.ts')
+const desktopUpdateManifest = await readText('packages/desktop/src/main/custom-update-manifest.ts')
 const desktopInstallerScript = await readText('packages/desktop/build/installer.nsh')
 const desktopRuntimeManager = await readText('packages/desktop/src/main/runtime-manager.ts')
 const desktopPaths = await readText('packages/desktop/src/main/paths.ts')
@@ -523,12 +524,21 @@ for (const phrase of [
 }
 
 for (const phrase of [
-  'https://download.ekkolearnai.com/latest',
-  'https://github.com/EKKOLearnAI/hermes-studio/releases/latest/download',
+  'releases/download/custom-latest',
+  'customizationManifestUrl',
+]) {
+  if (!desktopUpdater.includes(phrase) && !desktopUpdateManifest.includes(phrase)) {
+    fail(`desktop updater must stay on the validated custom channel: ${phrase}`)
+  }
+}
+
+for (const phrase of [
+  'download.ekkolearnai.com/latest',
+  'EKKOLearnAI/hermes-studio/releases/latest/download',
   'checkForUpdatesWithFallback()',
 ]) {
-  if (!desktopUpdater.includes(phrase)) {
-    fail(`desktop updater must check Cloudflare first and keep GitHub as fallback: ${phrase}`)
+  if (desktopUpdater.includes(phrase)) {
+    fail(`desktop updater must not retain the official fallback channel: ${phrase}`)
   }
 }
 

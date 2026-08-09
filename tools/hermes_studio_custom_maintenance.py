@@ -194,31 +194,47 @@ def install_dist(source_dist: Path, label: str, log: Callable[[str], None] = pri
     previous = INSTALL_DIST.with_name("dist.hermes-maintenance-previous")
     shutil.rmtree(staging, ignore_errors=True)
     shutil.rmtree(previous, ignore_errors=True)
-    shutil.copytree(source_dist, staging)
-    validate_dist(staging)
-    INSTALL_DIST.rename(previous)
     try:
-        staging.rename(INSTALL_DIST)
-        validate_dist(INSTALL_DIST)
-        launch_studio(log)
-        if not wait_until_ready():
-            raise RuntimeError("Le serveur Hermes Studio ne répond pas après l'installation.")
-    except Exception:
-        log("Échec : restauration automatique du bundle précédent.")
+        shutil.copytree(source_dist, staging)
+        validate_dist(staging)
+        INSTALL_DIST.rename(previous)
         try:
-            stop_studio(log)
-        except Exception as stop_error:
-            log(f"Fermeture du renderer après échec impossible : {stop_error}")
-        shutil.rmtree(INSTALL_DIST, ignore_errors=True)
+            staging.rename(INSTALL_DIST)
+            validate_dist(INSTALL_DIST)
+            launch_studio(log)
+            if not wait_until_ready():
+                raise RuntimeError("Le serveur Hermes Studio ne répond pas après l'installation.")
+        except Exception:
+            log("Échec : restauration automatique du bundle précédent.")
+            try:
+                stop_studio(log)
+            except Exception as stop_error:
+                log(f"Fermeture du renderer après échec impossible : {stop_error}")
+            if previous.exists():
+                shutil.rmtree(INSTALL_DIST, ignore_errors=True)
+                previous.rename(INSTALL_DIST)
+            try:
+                launch_studio(log)
+                if not wait_until_ready(timeout=30):
+                    log("Le serveur Hermes Studio ne répond pas après restauration.")
+            except Exception as relaunch_error:
+                log(f"Relance après restauration impossible : {relaunch_error}")
+            raise
+    except Exception:
+        # Copy/staging failures happen before the installed directory is moved;
+        # leave the original bundle intact and relaunch it.
         if previous.exists():
+            shutil.rmtree(INSTALL_DIST, ignore_errors=True)
             previous.rename(INSTALL_DIST)
         try:
-            launch_studio(log)
-            wait_until_ready(timeout=30)
+            if not studio_processes():
+                launch_studio(log)
+                wait_until_ready(timeout=30)
         except Exception as relaunch_error:
-            log(f"Relance après restauration impossible : {relaunch_error}")
+            log(f"Relance après échec de préparation impossible : {relaunch_error}")
         raise
     finally:
+        shutil.rmtree(staging, ignore_errors=True)
         shutil.rmtree(previous, ignore_errors=True)
 
     log(f"{label} appliqué avec succès. Les données utilisateur n'ont pas été touchées.")

@@ -1,4 +1,6 @@
-export const CUSTOM_UPDATE_FEED_URL = 'https://github.com/jeaxindr-dotcom/hermes-studio/releases/latest/download'
+// Dedicated immutable channel tag. The custom updater must never consume the
+// repository's official `latest` release.
+export const CUSTOM_UPDATE_FEED_URL = 'https://github.com/jeaxindr-dotcom/hermes-studio/releases/download/custom-latest'
 export const CUSTOM_UPDATE_TRUSTED_HOSTS = [
   'github.com',
   'release-assets.githubusercontent.com',
@@ -28,6 +30,8 @@ export type CustomizationManifest = {
   }
   customCommit?: unknown
   upstreamCommit?: unknown
+  clientSha256?: unknown
+  serverSha256?: unknown
 }
 
 export type ManifestValidation =
@@ -40,6 +44,10 @@ export function customizationManifestUrl(feedUrl = CUSTOM_UPDATE_FEED_URL): stri
 
 function isCommit(value: unknown): boolean {
   return /^[0-9a-f]{40}$/i.test(String(value || '').trim())
+}
+
+function isSha256(value: unknown): boolean {
+  return /^[0-9a-f]{64}$/i.test(String(value || '').trim())
 }
 
 export function validateCustomizationManifest(
@@ -64,15 +72,18 @@ export function validateCustomizationManifest(
     || manifest.update.allowOfficialFallback !== false) {
     return { ok: false, reason: 'The customization manifest does not pin the custom update feed.' }
   }
+  if (manifest.source?.repository !== CUSTOM_UPDATE_REPOSITORY) {
+    return { ok: false, reason: 'The customization manifest does not identify the custom source repository.' }
+  }
+  if (manifest.upstream?.repository !== UPSTREAM_REPOSITORY || !isCommit(manifest.upstream.baseCommit)) {
+    return { ok: false, reason: 'The customization manifest does not identify the upstream base commit.' }
+  }
   const sourceCommit = manifest.source?.commit || manifest.customCommit
   if (!isCommit(sourceCommit)) {
     return { ok: false, reason: 'The customization manifest has no valid source commit.' }
   }
-  if (manifest.source && manifest.source.repository !== CUSTOM_UPDATE_REPOSITORY) {
-    return { ok: false, reason: 'The customization manifest points to another source repository.' }
-  }
-  if (manifest.upstream && manifest.upstream.repository !== UPSTREAM_REPOSITORY) {
-    return { ok: false, reason: 'The customization manifest points to another upstream repository.' }
+  if (!isSha256(manifest.clientSha256) || !isSha256(manifest.serverSha256)) {
+    return { ok: false, reason: 'The customization manifest is missing valid bundle hashes.' }
   }
   return { ok: true }
 }

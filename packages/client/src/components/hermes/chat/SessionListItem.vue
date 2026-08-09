@@ -161,7 +161,6 @@ onUnmounted(() => {
               <path d="M8 3l8 0 0 5 3 5-14 0 3-5z" />
             </svg>
           </span>
-          <span v-if="completedUnread" class="session-item-unread-dot" aria-hidden="true" />
           <span class="session-item-title" dir="auto">
             {{ session.title }}
           </span>
@@ -325,15 +324,6 @@ onUnmounted(() => {
   justify-content: center;
   flex-shrink: 0;
   color: var(--accent-primary);
-}
-
-.session-item-unread-dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.12);
 }
 
 .session-item-time {
