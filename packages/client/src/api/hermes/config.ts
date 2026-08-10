@@ -55,8 +55,10 @@ export interface PrivacyConfig {
   redact_pii?: boolean
 }
 
+export type ApprovalMode = 'smart' | 'manual' | 'off'
+
 export interface ApprovalConfig {
-  mode?: 'off' | 'manual'
+  mode?: ApprovalMode
   timeout?: number
 }
 

@@ -20,7 +20,11 @@ vi.mock('naive-ui', () => ({
   NButton: { template: '<button type="button" v-bind="$attrs"><slot /><slot name="icon" /></button>' },
   NTooltip: { template: '<div><slot name="trigger" /><slot /></div>' },
   NSwitch: { template: '<button type="button"></button>' },
-  NDropdown: { template: '<div><slot /></div>' },
+  NDropdown: {
+    props: ['options'],
+    emits: ['select'],
+    template: '<div><slot /><button v-for="option in options || []" :key="option.key" type="button" class="n-dropdown-option-test" :data-key="option.key" @click="$emit(\'select\', option.key)">{{ option.label }}</button></div>',
+  },
   NModal: { template: '<div><slot /><slot name="footer" /></div>' },
   NInputNumber: { template: '<input />' },
   NPopover: {
@@ -275,6 +279,59 @@ describe('ChatInput draft persistence', () => {
     await nextTick()
 
     expect(wrapper.find('.n-popover-stub').exists()).toBe(false)
+  })
+
+  it('renders the authorization mode control after the model selector', async () => {
+    const wrapper = mountForSession('session-authorization')
+    await nextTick()
+
+    const modelButton = wrapper.get('.input-model-button').element
+    const authorizationButton = wrapper.get('.authorization-mode-button').element
+    expect(modelButton.compareDocumentPosition(authorizationButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.get('.authorization-mode-button').attributes('aria-label')).toContain('chat.authorizationMode')
+  })
+
+  it('persists manual authorization mode through the active profile approvals config', async () => {
+    const wrapper = mountForSession('session-authorization-manual')
+    const settingsStore = useSettingsStore()
+    const saveSection = vi.spyOn(settingsStore, 'saveSection').mockResolvedValue(undefined)
+
+    await wrapper.get('.n-dropdown-option-test[data-key="manual"]').trigger('click')
+
+    expect(saveSection).toHaveBeenCalledWith('approvals', { mode: 'manual' })
+  })
+
+  it('updates the authorization mode immediately while persistence is pending', async () => {
+    const wrapper = mountForSession('session-authorization-pending')
+    const settingsStore = useSettingsStore()
+    let resolveSave: () => void = () => {}
+    const savePromise = new Promise<void>((resolve) => {
+      resolveSave = resolve
+    })
+    vi.spyOn(settingsStore, 'saveSection').mockReturnValue(savePromise)
+
+    const pendingClick = wrapper.get('.n-dropdown-option-test[data-key="manual"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.get('.authorization-mode-button').classes()).toContain('authorization-mode-button--manual')
+
+    resolveSave()
+    await pendingClick
+  })
+
+  it('requires explicit confirmation before enabling full authorization mode', async () => {
+    const wrapper = mountForSession('session-authorization-off')
+    const settingsStore = useSettingsStore()
+    const saveSection = vi.spyOn(settingsStore, 'saveSection').mockResolvedValue(undefined)
+
+    await wrapper.get('.n-dropdown-option-test[data-key="off"]').trigger('click')
+
+    expect(dialogWarningMock).toHaveBeenCalled()
+    expect(saveSection).not.toHaveBeenCalled()
+
+    const positiveResult = dialogWarningMock.mock.calls[0][0].onPositiveClick()
+    expect(positiveResult).toBe(true)
+    expect(saveSection).toHaveBeenCalledWith('approvals', { mode: 'off' })
   })
 
   it('stores maximum reasoning effort for the active session', async () => {

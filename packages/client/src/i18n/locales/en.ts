@@ -694,6 +694,22 @@ export default {
         xhigh: 'Extra high',
       },
     },
+    authorizationMode: {
+      tooltip: 'Command authorization',
+      options: {
+        smart: 'Smart',
+        manual: 'Ask every time',
+        off: 'Full access',
+      },
+      descriptions: {
+        smart: 'Automatic risk evaluation; dangerous commands may request confirmation.',
+        manual: 'Explicit confirmation before every command that requires authorization.',
+        off: 'Full control: commands are authorized automatically. Use with caution.',
+      },
+      fullAccessTitle: 'Enable full access?',
+      fullAccessConfirm: 'Dangerous commands may run automatically without confirmation. Verify that you really want to grant this level of control.',
+      enableFullAccess: 'Enable full access',
+    },
     autoPlaySpeech: 'Auto-play voice',
     voiceInput: {
       startCapture: 'Start voice capture',

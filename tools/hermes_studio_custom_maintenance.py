@@ -55,6 +55,16 @@ def timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def safe_logger(log: Callable[[str], None]) -> Callable[[str], None]:
+    """Make deployment logging non-fatal when the terminal pipe disappears."""
+    def write(message: str) -> None:
+        try:
+            log(message)
+        except (BrokenPipeError, OSError):
+            pass
+    return write
+
+
 def node_executable() -> str:
     candidates = [
         os.environ.get("HERMES_NODE", "").strip(),
@@ -192,7 +202,13 @@ def restore_main_window(log: Callable[[str], None] = print) -> bool:
     _, hwnd = max(candidates)
     user32.ShowWindow(hwnd, 9)  # SW_RESTORE
     user32.SetForegroundWindow(hwnd)
-    log("Fenêtre principale Hermes Studio restaurée au premier plan.")
+    # A detached maintenance process may lose its stdout/stderr pipe while
+    # Electron is restarting. Window restoration is best-effort and must not
+    # turn a successful bundle replacement into a rollback.
+    try:
+        log("Fenêtre principale Hermes Studio restaurée au premier plan.")
+    except (BrokenPipeError, OSError):
+        pass
     return True
 
 
@@ -232,6 +248,7 @@ def extract_backup(archive: Path, destination: Path) -> Path:
 
 
 def install_dist(source_dist: Path, label: str, log: Callable[[str], None] = print) -> dict[str, object]:
+    log = safe_logger(log)
     source_dist = source_dist.resolve()
     validate_dist(source_dist)
     if not INSTALL_DIST.is_dir():

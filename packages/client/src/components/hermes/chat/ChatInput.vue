@@ -4,6 +4,7 @@ import { useChatStore } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import type { ApprovalMode } from '@/api/hermes/config'
 import { fetchContextLength } from '@/api/hermes/sessions'
 import { setModelContext } from '@/api/hermes/model-context'
 import { fetchSkills, type SkillCategory, type SkillInfo } from '@/api/hermes/skills'
@@ -115,6 +116,101 @@ const compactModelLabel = computed(() => {
   const parts = label.split('/').filter(Boolean)
   return parts[parts.length - 1] || label
 })
+
+type AuthorizationModeOption = {
+  mode: ApprovalMode
+  label: string
+  description: string
+}
+
+const pendingAuthorizationMode = ref<ApprovalMode | null>(null)
+let authorizationModeRequestId = 0
+const authorizationMode = computed<ApprovalMode>(() => {
+  if (pendingAuthorizationMode.value) return pendingAuthorizationMode.value
+  const mode = settingsStore.approvals.mode
+  return mode === 'manual' || mode === 'off' ? mode : 'smart'
+})
+const authorizationModeOptions = computed<AuthorizationModeOption[]>(() => [
+  {
+    mode: 'smart',
+    label: t('chat.authorizationMode.options.smart'),
+    description: t('chat.authorizationMode.descriptions.smart'),
+  },
+  {
+    mode: 'manual',
+    label: t('chat.authorizationMode.options.manual'),
+    description: t('chat.authorizationMode.descriptions.manual'),
+  },
+  {
+    mode: 'off',
+    label: t('chat.authorizationMode.options.off'),
+    description: t('chat.authorizationMode.descriptions.off'),
+  },
+])
+const authorizationModeLabel = computed(() =>
+  authorizationModeOptions.value.find(option => option.mode === authorizationMode.value)?.label
+  || t('chat.authorizationMode.options.smart'),
+)
+const authorizationModeDescription = computed(() =>
+  authorizationModeOptions.value.find(option => option.mode === authorizationMode.value)?.description
+  || t('chat.authorizationMode.descriptions.smart'),
+)
+
+function authorizationModeIcon(mode: ApprovalMode) {
+  return () => h('span', {
+    class: ['authorization-mode-option-icon', `authorization-mode-option-icon--${mode}`],
+    'aria-hidden': 'true',
+  }, mode === 'smart' ? '◈' : mode === 'manual' ? '◇' : '⚠')
+}
+
+const authorizationModeDropdownOptions = computed<DropdownOption[]>(() =>
+  authorizationModeOptions.value.map(option => ({
+    key: option.mode,
+    label: option.label,
+    icon: authorizationModeIcon(option.mode),
+  })),
+)
+
+async function persistAuthorizationMode(mode: ApprovalMode) {
+  const previousMode = authorizationMode.value
+  const requestId = ++authorizationModeRequestId
+  pendingAuthorizationMode.value = mode
+  settingsStore.updateLocal('approvals', { mode })
+
+  try {
+    await settingsStore.saveSection('approvals', { mode })
+    if (requestId !== authorizationModeRequestId) return
+    pendingAuthorizationMode.value = null
+    message.success(t('settings.saved'))
+  } catch {
+    if (requestId === authorizationModeRequestId) {
+      pendingAuthorizationMode.value = null
+      settingsStore.updateLocal('approvals', { mode: previousMode })
+      message.error(t('settings.saveFailed'))
+    }
+  }
+}
+
+async function handleAuthorizationModeSelect(key: string | number) {
+  const mode = String(key) as ApprovalMode
+  if (!['smart', 'manual', 'off'].includes(mode) || mode === authorizationMode.value) return
+
+  if (mode === 'off') {
+    dialog.warning({
+      title: t('chat.authorizationMode.fullAccessTitle'),
+      content: t('chat.authorizationMode.fullAccessConfirm'),
+      positiveText: t('chat.authorizationMode.enableFullAccess'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => {
+        void persistAuthorizationMode('off')
+        return true
+      },
+    })
+    return
+  }
+
+  await persistAuthorizationMode(mode)
+}
 
 const DRAFT_STORAGE_KEY = 'hermes_chat_input_drafts_v1'
 type DraftMap = Record<string, string>
@@ -1585,6 +1681,37 @@ function isImage(type: string): boolean {
             {{ props.modelLabel || t('models.selectModel') }}
           </NTooltip>
 
+          <NDropdown
+            trigger="click"
+            placement="top-start"
+            :options="authorizationModeDropdownOptions"
+            :show-arrow="true"
+            @select="handleAuthorizationModeSelect"
+          >
+            <NTooltip trigger="hover" :disabled="isMobileViewport">
+              <template #trigger>
+                <NButton
+                  quaternary
+                  size="tiny"
+                  class="authorization-mode-button"
+                  :class="`authorization-mode-button--${authorizationMode}`"
+                  :aria-label="`${t('chat.authorizationMode.tooltip')}: ${authorizationModeLabel}`"
+                  :title="authorizationModeDescription"
+                >
+                  <template #icon>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 3 20 7.5v5.8c0 3.5-2.2 6.2-8 7.7-5.8-1.5-8-4.2-8-7.7V7.5L12 3Z" />
+                      <path d="m8.8 12 2.1 2.1 4.4-4.4" />
+                    </svg>
+                  </template>
+                  <span class="authorization-mode-label">{{ authorizationModeLabel }}</span>
+                  <svg class="toolbar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+                </NButton>
+              </template>
+              {{ t('chat.authorizationMode.tooltip') }}: {{ authorizationModeLabel }}
+            </NTooltip>
+          </NDropdown>
+
         </div>
         <div class="input-actions">
           <VoiceDialogueControls
@@ -1929,6 +2056,65 @@ function isImage(type: string): boolean {
   white-space: nowrap;
 }
 
+.authorization-mode-button {
+  color: $text-secondary;
+  border-radius: 999px;
+  max-width: 160px;
+  padding: 0 4px 0 6px;
+  transition: color 0.18s ease, background-color 0.18s ease;
+
+  :deep(.n-button__content) {
+    gap: 4px;
+    min-width: 0;
+  }
+
+  :deep(.n-button__state-border),
+  :deep(.n-button__border),
+  :deep(.n-button__ripple) {
+    display: none;
+  }
+
+  &:hover,
+  &:focus-visible {
+    background: rgba(var(--text-primary-rgb), 0.07);
+  }
+
+  &--manual {
+    color: #d9b35a;
+  }
+
+  &--off {
+    color: #f59b45;
+    background: rgba(245, 155, 69, 0.1);
+  }
+}
+
+.authorization-mode-label {
+  display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authorization-mode-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: $text-secondary;
+  font-size: 14px;
+  font-weight: 700;
+
+  &--manual {
+    color: #d9b35a;
+  }
+
+  &--off {
+    color: #f59b45;
+  }
+}
+
 .reasoning-effort-button {
   color: $text-secondary;
   border-radius: 999px;
@@ -2217,7 +2403,14 @@ function isImage(type: string): boolean {
     padding: 0 4px 0 6px;
   }
 
-  .input-model-label {
+  .authorization-mode-button {
+    min-width: 35px;
+    max-width: 35px;
+    padding: 0 4px 0 6px;
+  }
+
+  .input-model-label,
+  .authorization-mode-label {
     display: none;
   }
 

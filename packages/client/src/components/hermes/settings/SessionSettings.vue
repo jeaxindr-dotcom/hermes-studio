@@ -65,7 +65,7 @@ async function toggleWriteApproval(section: "memory" | "skills", value: boolean)
       :label="t('settings.session.requireAuth')"
       :hint="t('settings.session.requireAuthHint')"
     >
-      <NSwitch :value="settingsStore.approvals.mode === 'manual'" @update:value="toggleRequireAuth" />
+      <NSwitch :value="settingsStore.approvals.mode !== 'off'" @update:value="toggleRequireAuth" />
     </SettingRow>
     <SettingRow
       :label="t('settings.session.memoryWriteApproval')"

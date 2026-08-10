@@ -675,6 +675,22 @@ export default {
         xhigh: 'Très élevé',
       },
     },
+    authorizationMode: {
+      tooltip: 'Autorisation des commandes',
+      options: {
+        smart: 'Smart',
+        manual: 'Demander à chaque fois',
+        off: 'Accès complet',
+      },
+      descriptions: {
+        smart: 'Évaluation automatique du risque ; les commandes dangereuses peuvent demander une confirmation.',
+        manual: 'Confirmation explicite avant chaque commande nécessitant une autorisation.',
+        off: 'Contrôle total : les commandes sont autorisées automatiquement. À utiliser avec prudence.',
+      },
+      fullAccessTitle: 'Activer l’accès complet ?',
+      fullAccessConfirm: 'Les commandes dangereuses pourront être exécutées automatiquement sans confirmation. Vérifiez que vous accordez bien ce niveau de contrôle.',
+      enableFullAccess: 'Activer l’accès complet',
+    },
     showToolCalls: 'Afficher les appels d’outils',
     hideToolCalls: 'Masquer les appels d’outils',
     messageQueue: 'File de messages',
