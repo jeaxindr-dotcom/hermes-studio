@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import * as profilesApi from '@/api/hermes/profiles'
 import type { HermesProfile, HermesProfileDetail } from '@/api/hermes/profiles'
 import { useAppStore } from './app'
+import { useSettingsStore } from './settings'
 
 const ACTIVE_PROFILE_STORAGE_KEY = 'hermes_active_profile_name'
 
@@ -132,6 +133,10 @@ export const useProfilesStore = defineStore('profiles', () => {
     try {
       const ok = await profilesApi.switchProfile(name)
       if (ok) {
+        // The server-side profile changes before the client profile marker.
+        // Load its settings first so consumers never use the previous
+        // profile's optimistic values as a rollback baseline.
+        await useSettingsStore().fetchSettings()
         activeProfileName.value = name
         localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, name)
         profiles.value = profiles.value.map(profile => ({

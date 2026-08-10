@@ -15,10 +15,11 @@ const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
 
-let approvalSaveQueue: Promise<void> = Promise.resolve();
+const approvalSaveQueues = new Map<string, Promise<void>>();
 let approvalRequestId = 0;
-let committedApprovalMode: ApprovalMode | null = null;
-let approvalProfileKey = profilesStore.activeProfileName || 'default';
+const committedApprovalModes = new Map<string, ApprovalMode>();
+let pendingApprovalProfileKey: string | null = null;
+let pendingApprovalMode: ApprovalMode | null = null;
 
 function currentApprovalProfileKey() {
   return profilesStore.activeProfileName || 'default';
@@ -30,8 +31,8 @@ function normalizeApprovalMode(value: unknown): ApprovalMode {
 
 watch(() => profilesStore.activeProfileName, () => {
   approvalRequestId += 1;
-  committedApprovalMode = null;
-  approvalProfileKey = currentApprovalProfileKey();
+  pendingApprovalProfileKey = null;
+  pendingApprovalMode = null;
 });
 
 // 防抖保存：每个字段独立定时器，300ms 内只发最后一次 HTTP 请求
@@ -81,34 +82,45 @@ async function toggleRequireAuth(value: boolean) {
 
 async function saveApprovalMode(mode: 'manual' | 'off') {
   const profileKey = currentApprovalProfileKey();
-  if (profileKey !== approvalProfileKey) {
-    approvalRequestId += 1;
-    committedApprovalMode = null;
-    approvalProfileKey = profileKey;
-  }
   const requestId = ++approvalRequestId;
-  const baseline = committedApprovalMode ?? normalizeApprovalMode(settingsStore.approvals.mode);
-  if (committedApprovalMode === null) committedApprovalMode = baseline;
+  const baseline = committedApprovalModes.get(profileKey) ?? normalizeApprovalMode(settingsStore.approvals.mode);
+  committedApprovalModes.set(profileKey, baseline);
+  pendingApprovalProfileKey = profileKey;
+  pendingApprovalMode = mode;
   settingsStore.updateLocal('approvals', { mode });
 
-  approvalSaveQueue = approvalSaveQueue.then(async () => {
+  const previousSave = approvalSaveQueues.get(profileKey) || Promise.resolve();
+  const currentSave = previousSave.then(async () => {
     if (profileKey !== currentApprovalProfileKey()) return;
     try {
       await settingsStore.saveSection('approvals', { mode }, {
         shouldCommit: () => profileKey === currentApprovalProfileKey(),
       });
       if (profileKey !== currentApprovalProfileKey()) return;
-      committedApprovalMode = mode;
-      if (requestId === approvalRequestId) message.success(t("settings.saved"));
+      committedApprovalModes.set(profileKey, mode);
+      if (requestId === approvalRequestId) {
+        pendingApprovalProfileKey = null;
+        pendingApprovalMode = null;
+        message.success(t("settings.saved"));
+      }
     } catch (err: any) {
       if (requestId === approvalRequestId && profileKey === currentApprovalProfileKey()) {
-        settingsStore.updateLocal('approvals', { mode: committedApprovalMode ?? baseline });
+        settingsStore.updateLocal('approvals', { mode: committedApprovalModes.get(profileKey) ?? baseline });
+        pendingApprovalProfileKey = null;
+        pendingApprovalMode = null;
         message.error(t("settings.saveFailed"));
       }
     }
   });
-  await approvalSaveQueue;
+  approvalSaveQueues.set(profileKey, currentSave);
+  await currentSave;
 }
+
+watch(() => settingsStore.approvals.mode, mode => {
+  const profileKey = currentApprovalProfileKey();
+  if (pendingApprovalProfileKey === profileKey && pendingApprovalMode !== null) return;
+  committedApprovalModes.set(profileKey, normalizeApprovalMode(mode));
+});
 
 async function toggleWriteApproval(section: "memory" | "skills", value: boolean) {
   try {

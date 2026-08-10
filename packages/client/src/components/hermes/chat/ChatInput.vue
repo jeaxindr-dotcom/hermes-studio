@@ -124,9 +124,9 @@ type AuthorizationModeOption = {
 }
 
 const pendingAuthorizationMode = ref<ApprovalMode | null>(null)
-const committedAuthorizationMode = ref<ApprovalMode | null>(null)
 let authorizationModeRequestId = 0
-let authorizationSaveQueue: Promise<void> = Promise.resolve()
+const committedAuthorizationModes = new Map<string, ApprovalMode>()
+const authorizationSaveQueues = new Map<string, Promise<void>>()
 
 function normalizeAuthorizationMode(value: unknown): ApprovalMode {
   return value === 'manual' || value === 'off' ? value : 'smart'
@@ -181,21 +181,22 @@ const authorizationModeDropdownOptions = computed<DropdownOption[]>(() =>
 async function persistAuthorizationMode(mode: ApprovalMode) {
   const requestId = ++authorizationModeRequestId
   const profileKey = profilesStore.activeProfileName || 'default'
-  const baseline = committedAuthorizationMode.value
+  const baseline = committedAuthorizationModes.get(profileKey)
     ?? normalizeAuthorizationMode(settingsStore.approvals.mode)
-  if (committedAuthorizationMode.value === null) committedAuthorizationMode.value = baseline
+  committedAuthorizationModes.set(profileKey, baseline)
 
   pendingAuthorizationMode.value = mode
   settingsStore.updateLocal('approvals', { mode })
 
-  authorizationSaveQueue = authorizationSaveQueue.then(async () => {
+  const previousSave = authorizationSaveQueues.get(profileKey) || Promise.resolve()
+  const currentSave = previousSave.then(async () => {
     if (profileKey !== (profilesStore.activeProfileName || 'default')) return
     try {
       await settingsStore.saveSection('approvals', { mode }, {
         shouldCommit: () => profileKey === (profilesStore.activeProfileName || 'default'),
       })
       if (profileKey !== (profilesStore.activeProfileName || 'default')) return
-      committedAuthorizationMode.value = mode
+      committedAuthorizationModes.set(profileKey, mode)
       if (requestId === authorizationModeRequestId) {
         pendingAuthorizationMode.value = null
         message.success(t('settings.saved'))
@@ -204,14 +205,14 @@ async function persistAuthorizationMode(mode: ApprovalMode) {
       if (requestId === authorizationModeRequestId) {
         pendingAuthorizationMode.value = null
         settingsStore.updateLocal('approvals', {
-          mode: committedAuthorizationMode.value ?? baseline,
+          mode: committedAuthorizationModes.get(profileKey) ?? baseline,
         })
         message.error(t('settings.saveFailed'))
       }
     }
   })
-
-  await authorizationSaveQueue
+  authorizationSaveQueues.set(profileKey, currentSave)
+  await currentSave
 }
 
 async function handleAuthorizationModeSelect(key: string | number) {
@@ -768,9 +769,21 @@ watch(
     bundles.value = []
     authorizationModeRequestId += 1
     pendingAuthorizationMode.value = null
-    committedAuthorizationMode.value = null
+    committedAuthorizationModes.set(
+      profilesStore.activeProfileName || 'default',
+      normalizeAuthorizationMode(settingsStore.approvals.mode),
+    )
   },
 )
+
+watch(() => settingsStore.approvals.mode, mode => {
+  if (!pendingAuthorizationMode.value) {
+    committedAuthorizationModes.set(
+      profilesStore.activeProfileName || 'default',
+      normalizeAuthorizationMode(mode),
+    )
+  }
+})
 
 const canSend = computed(() => inputText.value.trim().length > 0 || attachments.value.length > 0)
 const sendButtonIsStop = computed(() => chatStore.isStreaming && !canSend.value)
