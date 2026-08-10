@@ -20,12 +20,20 @@ const mockPrefsStore = vi.hoisted(() => ({
   }),
 }))
 
+const mockProfilesStore = vi.hoisted(() => ({
+  activeProfileName: 'default',
+}))
+
 vi.mock('@/stores/hermes/settings', () => ({
   useSettingsStore: () => mockSettingsStore,
 }))
 
 vi.mock('@/stores/hermes/session-browser-prefs', () => ({
   useSessionBrowserPrefsStore: () => mockPrefsStore,
+}))
+
+vi.mock('@/stores/hermes/profiles', () => ({
+  useProfilesStore: () => mockProfilesStore,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -41,6 +49,9 @@ vi.mock('naive-ui', async () => {
     useMessage: () => ({
       success: vi.fn(),
       error: vi.fn(),
+    }),
+    useDialog: () => ({
+      warning: vi.fn(),
     }),
   }
 })

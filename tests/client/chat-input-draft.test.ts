@@ -298,7 +298,7 @@ describe('ChatInput draft persistence', () => {
 
     await wrapper.get('.n-dropdown-option-test[data-key="manual"]').trigger('click')
 
-    expect(saveSection).toHaveBeenCalledWith('approvals', { mode: 'manual' })
+    expect(saveSection).toHaveBeenCalledWith('approvals', { mode: 'manual' }, expect.objectContaining({ shouldCommit: expect.any(Function) }))
   })
 
   it('updates the authorization mode immediately while persistence is pending', async () => {
@@ -358,7 +358,7 @@ describe('ChatInput draft persistence', () => {
     const positiveResult = dialogWarningMock.mock.calls[0][0].onPositiveClick()
     expect(positiveResult).toBe(true)
     await flushPromises()
-    expect(saveSection).toHaveBeenCalledWith('approvals', { mode: 'off' })
+    expect(saveSection).toHaveBeenCalledWith('approvals', { mode: 'off' }, expect.objectContaining({ shouldCommit: expect.any(Function) }))
   })
 
   it('stores maximum reasoning effort for the active session', async () => {

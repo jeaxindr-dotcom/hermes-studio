@@ -1,15 +1,38 @@
 <script setup lang="ts">
+import { watch } from "vue";
 import { NInputNumber, NSelect, NSwitch, useDialog, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "@/stores/hermes/settings";
+import { useProfilesStore } from "@/stores/hermes/profiles";
+import type { ApprovalMode } from "@/api/hermes/config";
 import { useSessionBrowserPrefsStore } from "@/stores/hermes/session-browser-prefs";
 import SettingRow from "./SettingRow.vue";
 
 const settingsStore = useSettingsStore();
+const profilesStore = useProfilesStore();
 const sessionBrowserPrefsStore = useSessionBrowserPrefsStore();
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
+
+let approvalSaveQueue: Promise<void> = Promise.resolve();
+let approvalRequestId = 0;
+let committedApprovalMode: ApprovalMode | null = null;
+let approvalProfileKey = profilesStore.activeProfileName || 'default';
+
+function currentApprovalProfileKey() {
+  return profilesStore.activeProfileName || 'default';
+}
+
+function normalizeApprovalMode(value: unknown): ApprovalMode {
+  return value === 'manual' || value === 'off' ? value : 'smart';
+}
+
+watch(() => profilesStore.activeProfileName, () => {
+  approvalRequestId += 1;
+  committedApprovalMode = null;
+  approvalProfileKey = currentApprovalProfileKey();
+});
 
 // 防抖保存：每个字段独立定时器，300ms 内只发最后一次 HTTP 请求
 const debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {};
@@ -57,13 +80,34 @@ async function toggleRequireAuth(value: boolean) {
 }
 
 async function saveApprovalMode(mode: 'manual' | 'off') {
-  try {
-    settingsStore.updateLocal('approvals', { mode });
-    await settingsStore.saveSection('approvals', { mode });
-    message.success(t("settings.saved"));
-  } catch (err: any) {
-    message.error(t("settings.saveFailed"));
+  const profileKey = currentApprovalProfileKey();
+  if (profileKey !== approvalProfileKey) {
+    approvalRequestId += 1;
+    committedApprovalMode = null;
+    approvalProfileKey = profileKey;
   }
+  const requestId = ++approvalRequestId;
+  const baseline = committedApprovalMode ?? normalizeApprovalMode(settingsStore.approvals.mode);
+  if (committedApprovalMode === null) committedApprovalMode = baseline;
+  settingsStore.updateLocal('approvals', { mode });
+
+  approvalSaveQueue = approvalSaveQueue.then(async () => {
+    if (profileKey !== currentApprovalProfileKey()) return;
+    try {
+      await settingsStore.saveSection('approvals', { mode }, {
+        shouldCommit: () => profileKey === currentApprovalProfileKey(),
+      });
+      if (profileKey !== currentApprovalProfileKey()) return;
+      committedApprovalMode = mode;
+      if (requestId === approvalRequestId) message.success(t("settings.saved"));
+    } catch (err: any) {
+      if (requestId === approvalRequestId && profileKey === currentApprovalProfileKey()) {
+        settingsStore.updateLocal('approvals', { mode: committedApprovalMode ?? baseline });
+        message.error(t("settings.saveFailed"));
+      }
+    }
+  });
+  await approvalSaveQueue;
 }
 
 async function toggleWriteApproval(section: "memory" | "skills", value: boolean) {

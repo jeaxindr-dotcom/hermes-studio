@@ -180,7 +180,7 @@ const authorizationModeDropdownOptions = computed<DropdownOption[]>(() =>
 
 async function persistAuthorizationMode(mode: ApprovalMode) {
   const requestId = ++authorizationModeRequestId
-  const profileKey = currentSkillsKey()
+  const profileKey = profilesStore.activeProfileName || 'default'
   const baseline = committedAuthorizationMode.value
     ?? normalizeAuthorizationMode(settingsStore.approvals.mode)
   if (committedAuthorizationMode.value === null) committedAuthorizationMode.value = baseline
@@ -189,10 +189,12 @@ async function persistAuthorizationMode(mode: ApprovalMode) {
   settingsStore.updateLocal('approvals', { mode })
 
   authorizationSaveQueue = authorizationSaveQueue.then(async () => {
-    if (profileKey !== currentSkillsKey()) return
+    if (profileKey !== (profilesStore.activeProfileName || 'default')) return
     try {
-      await settingsStore.saveSection('approvals', { mode })
-      if (profileKey !== currentSkillsKey()) return
+      await settingsStore.saveSection('approvals', { mode }, {
+        shouldCommit: () => profileKey === (profilesStore.activeProfileName || 'default'),
+      })
+      if (profileKey !== (profilesStore.activeProfileName || 'default')) return
       committedAuthorizationMode.value = mode
       if (requestId === authorizationModeRequestId) {
         pendingAuthorizationMode.value = null
