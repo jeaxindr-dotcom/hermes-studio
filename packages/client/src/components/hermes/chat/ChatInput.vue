@@ -124,7 +124,14 @@ type AuthorizationModeOption = {
 }
 
 const pendingAuthorizationMode = ref<ApprovalMode | null>(null)
+const committedAuthorizationMode = ref<ApprovalMode | null>(null)
 let authorizationModeRequestId = 0
+let authorizationSaveQueue: Promise<void> = Promise.resolve()
+
+function normalizeAuthorizationMode(value: unknown): ApprovalMode {
+  return value === 'manual' || value === 'off' ? value : 'smart'
+}
+
 const authorizationMode = computed<ApprovalMode>(() => {
   if (pendingAuthorizationMode.value) return pendingAuthorizationMode.value
   const mode = settingsStore.approvals.mode
@@ -172,23 +179,37 @@ const authorizationModeDropdownOptions = computed<DropdownOption[]>(() =>
 )
 
 async function persistAuthorizationMode(mode: ApprovalMode) {
-  const previousMode = authorizationMode.value
   const requestId = ++authorizationModeRequestId
+  const profileKey = currentSkillsKey()
+  const baseline = committedAuthorizationMode.value
+    ?? normalizeAuthorizationMode(settingsStore.approvals.mode)
+  if (committedAuthorizationMode.value === null) committedAuthorizationMode.value = baseline
+
   pendingAuthorizationMode.value = mode
   settingsStore.updateLocal('approvals', { mode })
 
-  try {
-    await settingsStore.saveSection('approvals', { mode })
-    if (requestId !== authorizationModeRequestId) return
-    pendingAuthorizationMode.value = null
-    message.success(t('settings.saved'))
-  } catch {
-    if (requestId === authorizationModeRequestId) {
-      pendingAuthorizationMode.value = null
-      settingsStore.updateLocal('approvals', { mode: previousMode })
-      message.error(t('settings.saveFailed'))
+  authorizationSaveQueue = authorizationSaveQueue.then(async () => {
+    if (profileKey !== currentSkillsKey()) return
+    try {
+      await settingsStore.saveSection('approvals', { mode })
+      if (profileKey !== currentSkillsKey()) return
+      committedAuthorizationMode.value = mode
+      if (requestId === authorizationModeRequestId) {
+        pendingAuthorizationMode.value = null
+        message.success(t('settings.saved'))
+      }
+    } catch {
+      if (requestId === authorizationModeRequestId) {
+        pendingAuthorizationMode.value = null
+        settingsStore.updateLocal('approvals', {
+          mode: committedAuthorizationMode.value ?? baseline,
+        })
+        message.error(t('settings.saveFailed'))
+      }
     }
-  }
+  })
+
+  await authorizationSaveQueue
 }
 
 async function handleAuthorizationModeSelect(key: string | number) {
@@ -743,6 +764,9 @@ watch(
     skillCategories.value = []
     bundlesLoadedKey = ''
     bundles.value = []
+    authorizationModeRequestId += 1
+    pendingAuthorizationMode.value = null
+    committedAuthorizationMode.value = null
   },
 )
 
@@ -1696,6 +1720,7 @@ function isImage(type: string): boolean {
                   class="authorization-mode-button"
                   :class="`authorization-mode-button--${authorizationMode}`"
                   :aria-label="`${t('chat.authorizationMode.tooltip')}: ${authorizationModeLabel}`"
+                  aria-haspopup="menu"
                   :title="authorizationModeDescription"
                 >
                   <template #icon>

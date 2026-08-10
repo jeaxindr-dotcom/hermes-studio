@@ -104,6 +104,7 @@ def studio_processes() -> list[psutil.Process]:
 
 
 def stop_studio(log: Callable[[str], None] = print) -> list[int]:
+    log = safe_logger(log)
     processes = studio_processes()
     pids = [process.pid for process in processes]
     for process in processes:
@@ -128,6 +129,7 @@ def stop_studio(log: Callable[[str], None] = print) -> list[int]:
 
 
 def launch_studio(log: Callable[[str], None] = print) -> int:
+    log = safe_logger(log)
     if not EXE.is_file():
         raise RuntimeError(f"Executable introuvable : {EXE}")
     flags = 0
@@ -165,6 +167,7 @@ def restore_main_window(log: Callable[[str], None] = print) -> bool:
     failed update to the user. Do not click or alter the Web UI; only restore
     the native main window selected by its size/title.
     """
+    log = safe_logger(log)
     if os.name != "nt":
         return False
     import ctypes
@@ -213,6 +216,7 @@ def restore_main_window(log: Callable[[str], None] = print) -> bool:
 
 
 def backup_installed_dist(log: Callable[[str], None] = print) -> Path:
+    log = safe_logger(log)
     validate_dist(INSTALL_DIST)
     WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
     archive = WORKSPACE_ROOT / f"{BACKUP_PREFIX}{timestamp()}.zip"
@@ -316,6 +320,7 @@ def reapply_local_build(log: Callable[[str], None] = print) -> dict[str, object]
 
 
 def rollback_latest(log: Callable[[str], None] = print) -> dict[str, object]:
+    log = safe_logger(log)
     archive = latest_backup()
     log(f"Rollback depuis : {archive}")
     with tempfile.TemporaryDirectory(prefix="hermes-studio-rollback-") as temporary:

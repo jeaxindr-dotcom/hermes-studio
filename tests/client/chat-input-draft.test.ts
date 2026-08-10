@@ -319,6 +319,32 @@ describe('ChatInput draft persistence', () => {
     await pendingClick
   })
 
+  it('serializes rapid authorization saves and keeps the latest successful mode', async () => {
+    const wrapper = mountForSession('session-authorization-race')
+    const settingsStore = useSettingsStore()
+    const pending: Array<{ resolve: () => void; reject: () => void }> = []
+    vi.spyOn(settingsStore, 'saveSection').mockImplementation(() => new Promise<void>((resolve, reject) => {
+      pending.push({ resolve, reject })
+    }))
+
+    const first = wrapper.get('.n-dropdown-option-test[data-key="manual"]').trigger('click')
+    await nextTick()
+    const second = wrapper.get('.n-dropdown-option-test[data-key="smart"]').trigger('click')
+    await nextTick()
+
+    expect(pending).toHaveLength(1)
+    pending[0].reject()
+    await flushPromises()
+    expect(pending).toHaveLength(2)
+
+    pending[1].resolve()
+    await Promise.all([first, second])
+    await nextTick()
+
+    expect(wrapper.get('.authorization-mode-button').classes()).not.toContain('authorization-mode-button--manual')
+    expect(settingsStore.approvals.mode).toBe('smart')
+  })
+
   it('requires explicit confirmation before enabling full authorization mode', async () => {
     const wrapper = mountForSession('session-authorization-off')
     const settingsStore = useSettingsStore()
@@ -331,6 +357,7 @@ describe('ChatInput draft persistence', () => {
 
     const positiveResult = dialogWarningMock.mock.calls[0][0].onPositiveClick()
     expect(positiveResult).toBe(true)
+    await flushPromises()
     expect(saveSection).toHaveBeenCalledWith('approvals', { mode: 'off' })
   })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NInputNumber, NSelect, NSwitch, useMessage } from "naive-ui";
+import { NInputNumber, NSelect, NSwitch, useDialog, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "@/stores/hermes/settings";
 import { useSessionBrowserPrefsStore } from "@/stores/hermes/session-browser-prefs";
@@ -8,6 +8,7 @@ import SettingRow from "./SettingRow.vue";
 const settingsStore = useSettingsStore();
 const sessionBrowserPrefsStore = useSessionBrowserPrefsStore();
 const message = useMessage();
+const dialog = useDialog();
 const { t } = useI18n();
 
 // 防抖保存：每个字段独立定时器，300ms 内只发最后一次 HTTP 请求
@@ -39,8 +40,26 @@ function debouncedSave(key: string, value: any) {
 }
 
 async function toggleRequireAuth(value: boolean) {
+  if (!value) {
+    dialog.warning({
+      title: t('chat.authorizationMode.fullAccessTitle'),
+      content: t('chat.authorizationMode.fullAccessConfirm'),
+      positiveText: t('chat.authorizationMode.enableFullAccess'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => {
+        void saveApprovalMode('off')
+        return true
+      },
+    })
+    return
+  }
+  await saveApprovalMode('manual')
+}
+
+async function saveApprovalMode(mode: 'manual' | 'off') {
   try {
-    await settingsStore.saveSection("approvals", { mode: value ? "manual" : "off" });
+    settingsStore.updateLocal('approvals', { mode });
+    await settingsStore.saveSection('approvals', { mode });
     message.success(t("settings.saved"));
   } catch (err: any) {
     message.error(t("settings.saveFailed"));
