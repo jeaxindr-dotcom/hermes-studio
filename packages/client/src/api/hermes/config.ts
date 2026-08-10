@@ -152,9 +152,9 @@ export interface MoaConfig {
   enabled: boolean
 }
 
-export async function fetchConfig(sections?: string[]): Promise<AppConfig> {
+export async function fetchConfig(sections?: string[], options?: { profile?: string }): Promise<AppConfig> {
   const query = sections ? `?sections=${sections.join(',')}` : ''
-  return request<AppConfig>(`/api/hermes/config${query}`)
+  return request<AppConfig>(`/api/hermes/config${query}`, options)
 }
 
 export async function updateConfigSection(

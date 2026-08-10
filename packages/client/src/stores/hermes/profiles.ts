@@ -15,6 +15,8 @@ export const useProfilesStore = defineStore('profiles', () => {
   const detailMap = ref<Record<string, HermesProfileDetail>>({})
   const loading = ref(false)
   const switching = ref(false)
+  let profileSwitchGeneration = 0
+  let profileSwitchQueue: Promise<boolean> = Promise.resolve(true)
 
   async function fetchProfiles() {
     loading.value = true
@@ -129,27 +131,37 @@ export const useProfilesStore = defineStore('profiles', () => {
   }
 
   async function switchProfile(name: string) {
+    const generation = ++profileSwitchGeneration
     switching.value = true
-    try {
-      const ok = await profilesApi.switchProfile(name)
-      if (ok) {
-        // The server-side profile changes before the client profile marker.
-        // Load its settings first so consumers never use the previous
-        // profile's optimistic values as a rollback baseline.
-        await useSettingsStore().fetchSettings()
+    const run = profileSwitchQueue.then(async () => {
+      const previousName = activeProfileName.value
+      try {
+        const ok = await profilesApi.switchProfile(name)
+        if (!ok || generation !== profileSwitchGeneration) return false
+        const loaded = await useSettingsStore().fetchSettings({
+          profile: name,
+          shouldCommit: () => generation === profileSwitchGeneration,
+        })
+        if (!loaded || generation !== profileSwitchGeneration) return false
         activeProfileName.value = name
         localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, name)
-        profiles.value = profiles.value.map(profile => ({
-          ...profile,
-          active: profile.name === name,
-        }))
+        profiles.value = profiles.value.map(profile => ({ ...profile, active: profile.name === name }))
         activeProfile.value = profiles.value.find(profile => profile.name === name) ?? null
         await useAppStore().reloadModels()
+        return true
+      } catch (error) {
+        if (generation === profileSwitchGeneration && previousName) {
+          activeProfileName.value = previousName
+          localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, previousName)
+        }
+        console.error('Failed to switch profile:', error)
+        return false
+      } finally {
+        if (generation === profileSwitchGeneration) switching.value = false
       }
-      return ok
-    } finally {
-      switching.value = false
-    }
+    })
+    profileSwitchQueue = run.catch(() => false)
+    return run
   }
 
   async function switchHermesProfile(name: string) {

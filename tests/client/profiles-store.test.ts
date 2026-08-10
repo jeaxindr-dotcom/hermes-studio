@@ -14,8 +14,12 @@ const mockProfilesApi = vi.hoisted(() => ({
   updateProfileAvatar: vi.fn(),
   deleteProfileAvatar: vi.fn(),
 }))
+const mockSettingsStore = vi.hoisted(() => ({ fetchSettings: vi.fn() }))
+const mockAppStore = vi.hoisted(() => ({ reloadModels: vi.fn() }))
 
 vi.mock('@/api/hermes/profiles', () => mockProfilesApi)
+vi.mock('@/stores/hermes/settings', () => ({ useSettingsStore: () => mockSettingsStore }))
+vi.mock('@/stores/hermes/app', () => ({ useAppStore: () => mockAppStore }))
 
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
@@ -23,6 +27,8 @@ describe('Profiles Store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    mockSettingsStore.fetchSettings.mockResolvedValue(true)
+    mockAppStore.reloadModels.mockResolvedValue(undefined)
   })
 
   it('fetchProfiles loads profiles and sets active', async () => {
@@ -172,7 +178,7 @@ describe('Profiles Store', () => {
     expect(store.switching).toBe(false)
   })
 
-  it('switchProfile updates activeProfileName immediately', async () => {
+  it('switchProfile updates activeProfileName after loading target settings', async () => {
     mockProfilesApi.switchProfile.mockResolvedValue(true)
     mockProfilesApi.fetchProfiles.mockResolvedValue([
       { name: 'default', active: false, model: 'gpt-4', alias: '' },
@@ -182,7 +188,7 @@ describe('Profiles Store', () => {
     const store = useProfilesStore()
     await store.switchProfile('dev')
 
-    // activeProfileName should be updated immediately
+    expect(mockSettingsStore.fetchSettings).toHaveBeenCalledWith(expect.objectContaining({ profile: 'dev' }))
     expect(store.activeProfileName).toBe('dev')
     // localStorage should also be updated
     expect(localStorage.getItem('hermes_active_profile_name')).toBe('dev')
@@ -206,23 +212,21 @@ describe('Profiles Store', () => {
     expect(localStorage.getItem('hermes_active_profile_name')).toBe(initialName)
   })
 
-  it('switchProfile keeps activeProfileName even if fetchProfiles fails', async () => {
+  it('switchProfile does not change activeProfileName if target settings fail', async () => {
     const initialName = 'default'
     localStorage.setItem('hermes_active_profile_name', initialName)
 
     mockProfilesApi.switchProfile.mockResolvedValue(true)
     mockProfilesApi.fetchProfiles.mockRejectedValue(new Error('Network error'))
+    mockSettingsStore.fetchSettings.mockResolvedValue(false)
 
     const store = useProfilesStore()
     store.activeProfileName = initialName
     const result = await store.switchProfile('dev')
 
-    // Should return true (API succeeded)
-    expect(result).toBe(true)
-    // activeProfileName should be updated even though fetchProfiles failed
-    expect(store.activeProfileName).toBe('dev')
-    // localStorage should be updated
-    expect(localStorage.getItem('hermes_active_profile_name')).toBe('dev')
+    expect(result).toBe(false)
+    expect(store.activeProfileName).toBe(initialName)
+    expect(localStorage.getItem('hermes_active_profile_name')).toBe(initialName)
   })
 
   it('switchProfile keeps the local selected profile independent of backend active flags', async () => {

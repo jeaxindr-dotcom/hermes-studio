@@ -127,6 +127,7 @@ const pendingAuthorizationMode = ref<ApprovalMode | null>(null)
 let authorizationModeRequestId = 0
 const committedAuthorizationModes = new Map<string, ApprovalMode>()
 const authorizationSaveQueues = new Map<string, Promise<void>>()
+const authorizationProfileGenerations = new Map<string, number>()
 
 function normalizeAuthorizationMode(value: unknown): ApprovalMode {
   return value === 'manual' || value === 'off' ? value : 'smart'
@@ -181,6 +182,7 @@ const authorizationModeDropdownOptions = computed<DropdownOption[]>(() =>
 async function persistAuthorizationMode(mode: ApprovalMode) {
   const requestId = ++authorizationModeRequestId
   const profileKey = profilesStore.activeProfileName || 'default'
+  const profileGeneration = authorizationProfileGenerations.get(profileKey) || 0
   const baseline = committedAuthorizationModes.get(profileKey)
     ?? normalizeAuthorizationMode(settingsStore.approvals.mode)
   committedAuthorizationModes.set(profileKey, baseline)
@@ -190,12 +192,12 @@ async function persistAuthorizationMode(mode: ApprovalMode) {
 
   const previousSave = authorizationSaveQueues.get(profileKey) || Promise.resolve()
   const currentSave = previousSave.then(async () => {
-    if (profileKey !== (profilesStore.activeProfileName || 'default')) return
+    if (profileKey !== (profilesStore.activeProfileName || 'default') || profileGeneration !== (authorizationProfileGenerations.get(profileKey) || 0)) return
     try {
       await settingsStore.saveSection('approvals', { mode }, {
-        shouldCommit: () => profileKey === (profilesStore.activeProfileName || 'default'),
+        shouldCommit: () => profileKey === (profilesStore.activeProfileName || 'default') && profileGeneration === (authorizationProfileGenerations.get(profileKey) || 0),
       })
-      if (profileKey !== (profilesStore.activeProfileName || 'default')) return
+      if (profileKey !== (profilesStore.activeProfileName || 'default') || profileGeneration !== (authorizationProfileGenerations.get(profileKey) || 0)) return
       committedAuthorizationModes.set(profileKey, mode)
       if (requestId === authorizationModeRequestId) {
         pendingAuthorizationMode.value = null
@@ -769,10 +771,9 @@ watch(
     bundles.value = []
     authorizationModeRequestId += 1
     pendingAuthorizationMode.value = null
-    committedAuthorizationModes.set(
-      profilesStore.activeProfileName || 'default',
-      normalizeAuthorizationMode(settingsStore.approvals.mode),
-    )
+    const profileKey = profilesStore.activeProfileName || 'default'
+    authorizationProfileGenerations.set(profileKey, (authorizationProfileGenerations.get(profileKey) || 0) + 1)
+    committedAuthorizationModes.set(profileKey, normalizeAuthorizationMode(settingsStore.approvals.mode))
   },
 )
 

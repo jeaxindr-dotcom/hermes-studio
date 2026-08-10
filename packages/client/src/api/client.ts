@@ -173,14 +173,17 @@ function responseErrorMessage(text: string, statusText: string): string {
   }
 }
 
-export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export type HermesRequestInit = RequestInit & { profile?: string }
+
+export async function request<T>(path: string, options: HermesRequestInit = {}): Promise<T> {
   await ensureDesktopAuthReady()
   const base = getBaseUrl()
   const url = `${base}${path}`
-  const isFormDataBody = typeof FormData !== 'undefined' && options.body instanceof FormData
+  const { profile: profileOverride, ...requestOptions } = options
+  const isFormDataBody = typeof FormData !== 'undefined' && requestOptions.body instanceof FormData
   const headers: Record<string, string> = {
     ...(isFormDataBody ? {} : { 'Content-Type': 'application/json' }),
-    ...options.headers as Record<string, string>,
+    ...requestOptions.headers as Record<string, string>,
   }
 
   const apiKey = getApiKey()
@@ -190,12 +193,12 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 
   // Inject active profile header for request-scoped endpoints. Explicit profile
   // selectors in the URL/body and profile-name routes are validated directly.
-  const profileName = getActiveProfileName()
-  if (profileName && shouldAttachProfileHeader(path, options)) {
+  const profileName = profileOverride || getActiveProfileName()
+  if (profileName && (profileOverride || shouldAttachProfileHeader(path, requestOptions))) {
     headers['X-Hermes-Profile'] = profileName
   }
 
-  const res = await fetch(url, { ...options, headers })
+  const res = await fetch(url, { ...requestOptions, headers })
 
   // Global 401 handler — only redirect to login for local BFF endpoints
   // Proxied gateway requests should not trigger logout

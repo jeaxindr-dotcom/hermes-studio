@@ -18,6 +18,7 @@ const { t } = useI18n();
 const approvalSaveQueues = new Map<string, Promise<void>>();
 let approvalRequestId = 0;
 const committedApprovalModes = new Map<string, ApprovalMode>();
+const approvalProfileGenerations = new Map<string, number>();
 let pendingApprovalProfileKey: string | null = null;
 let pendingApprovalMode: ApprovalMode | null = null;
 
@@ -33,6 +34,8 @@ watch(() => profilesStore.activeProfileName, () => {
   approvalRequestId += 1;
   pendingApprovalProfileKey = null;
   pendingApprovalMode = null;
+  const profileKey = currentApprovalProfileKey();
+  approvalProfileGenerations.set(profileKey, (approvalProfileGenerations.get(profileKey) || 0) + 1);
 });
 
 // 防抖保存：每个字段独立定时器，300ms 内只发最后一次 HTTP 请求
@@ -83,6 +86,7 @@ async function toggleRequireAuth(value: boolean) {
 async function saveApprovalMode(mode: 'manual' | 'off') {
   const profileKey = currentApprovalProfileKey();
   const requestId = ++approvalRequestId;
+  const profileGeneration = approvalProfileGenerations.get(profileKey) || 0;
   const baseline = committedApprovalModes.get(profileKey) ?? normalizeApprovalMode(settingsStore.approvals.mode);
   committedApprovalModes.set(profileKey, baseline);
   pendingApprovalProfileKey = profileKey;
@@ -91,12 +95,12 @@ async function saveApprovalMode(mode: 'manual' | 'off') {
 
   const previousSave = approvalSaveQueues.get(profileKey) || Promise.resolve();
   const currentSave = previousSave.then(async () => {
-    if (profileKey !== currentApprovalProfileKey()) return;
+    if (profileKey !== currentApprovalProfileKey() || profileGeneration !== (approvalProfileGenerations.get(profileKey) || 0)) return
     try {
       await settingsStore.saveSection('approvals', { mode }, {
-        shouldCommit: () => profileKey === currentApprovalProfileKey(),
+        shouldCommit: () => profileKey === currentApprovalProfileKey() && profileGeneration === (approvalProfileGenerations.get(profileKey) || 0),
       });
-      if (profileKey !== currentApprovalProfileKey()) return;
+      if (profileKey !== currentApprovalProfileKey() || profileGeneration !== (approvalProfileGenerations.get(profileKey) || 0)) return;
       committedApprovalModes.set(profileKey, mode);
       if (requestId === approvalRequestId) {
         pendingApprovalProfileKey = null;
@@ -104,7 +108,7 @@ async function saveApprovalMode(mode: 'manual' | 'off') {
         message.success(t("settings.saved"));
       }
     } catch (err: any) {
-      if (requestId === approvalRequestId && profileKey === currentApprovalProfileKey()) {
+      if (requestId === approvalRequestId && profileKey === currentApprovalProfileKey() && profileGeneration === (approvalProfileGenerations.get(profileKey) || 0)) {
         settingsStore.updateLocal('approvals', { mode: committedApprovalModes.get(profileKey) ?? baseline });
         pendingApprovalProfileKey = null;
         pendingApprovalMode = null;
