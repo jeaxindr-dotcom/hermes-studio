@@ -94,6 +94,8 @@ export interface ModelRequest {
   maxTokens?: number
   reasoningEffort?: ModelReasoningEffort
   reasoningSummary?: ModelReasoningSummary
+  /** Provider-specific OpenAI-compatible chat-template switches. */
+  chatTemplateKwargs?: Record<string, unknown>
   tools?: AgentToolDefinition[]
   toolChoice?: 'auto' | 'none' | 'required'
   stream?: boolean

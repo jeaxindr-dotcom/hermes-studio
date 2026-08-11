@@ -523,6 +523,16 @@ describe('ekko-agent model requests', () => {
     })
   })
 
+  it('forwards llama.cpp chat-template kwargs for non-thinking TQ3 requests', () => {
+    expect(toOpenAIChatPayload(providerConfig, {
+      messages: [{ role: 'user' as const, content: 'Say OK.' }],
+      chatTemplateKwargs: { enable_thinking: false },
+      stream: true,
+    })).toMatchObject({
+      chat_template_kwargs: { enable_thinking: false },
+    })
+  })
+
   it('strips tool choice inside AgentRuntime when its tool registry is empty', async () => {
     const create = vi.fn(async () => ({ content: 'done' }))
     const runtime = new AgentRuntime({

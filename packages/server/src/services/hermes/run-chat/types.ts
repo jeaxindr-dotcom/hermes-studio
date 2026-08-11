@@ -60,6 +60,7 @@ export interface QueuedRun {
   originSocketId?: string
   goalContinuation?: boolean
   reasoningEffort?: string
+  chatTemplateKwargs?: Record<string, unknown>
   backgroundDelegationId?: string
   backgroundClaimId?: string
   autonomous?: boolean

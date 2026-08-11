@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  normalizeReasoningEffortForProvider,
+  chatTemplateKwargsForProvider,
   reasoningEffortForResponseMode,
   responseModeFromReasoningEffort,
 } from '@/utils/response-mode'
@@ -22,23 +22,23 @@ describe('response mode', () => {
     expect(reasoningEffortForResponseMode('thinking', '')).toBe('medium')
   })
 
-  it('uses the TQ3-compatible low level instead of inline-think none', () => {
-    expect(normalizeReasoningEffortForProvider(
+  it('disables thinking through the TQ3 chat template in Fast mode', () => {
+    expect(chatTemplateKwargsForProvider(
       'none',
       'deepseek-tq3',
       'deepseek-v4-flash-r2-tq3_4s',
-    )).toBe('low')
-    expect(normalizeReasoningEffortForProvider(
+    )).toEqual({ enable_thinking: false })
+    expect(chatTemplateKwargsForProvider(
       'none',
-      'custom:deepseek-v4-tq3-local',
-      'deepseek-v4-flash-r2-tq3_4s',
-    )).toBe('low')
+      'local',
+      'deepseek-v4-flash-r2',
+    )).toEqual({ enable_thinking: false })
   })
 
-  it('does not change none for non-TQ3 providers', () => {
-    expect(normalizeReasoningEffortForProvider('none', 'openai-codex', 'gpt-5.6-luna'))
-      .toBe('none')
-    expect(normalizeReasoningEffortForProvider('', 'deepseek-tq3', 'deepseek-v4-flash-r2-tq3_4s'))
+  it('does not inject TQ3 template kwargs for other modes or providers', () => {
+    expect(chatTemplateKwargsForProvider('low', 'deepseek-tq3', 'deepseek-v4-flash-r2-tq3_4s'))
+      .toBeUndefined()
+    expect(chatTemplateKwargsForProvider('none', 'openai-codex', 'gpt-5.6-luna'))
       .toBeUndefined()
   })
 })

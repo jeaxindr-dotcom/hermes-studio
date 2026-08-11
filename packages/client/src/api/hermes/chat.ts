@@ -42,6 +42,8 @@ export interface StartRunRequest {
   /** Per-session reasoning effort override.
    * Empty/undefined = use config.yaml default. */
   reasoning_effort?: string
+  /** Provider-specific chat-template switches for OpenAI-compatible runtimes. */
+  chat_template_kwargs?: Record<string, unknown>
 }
 
 export interface StartRunResponse {

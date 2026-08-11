@@ -319,6 +319,7 @@ export class ChatRunSocket {
       allow_command_passthrough?: boolean
       // Local patch (reasoning-effort): per-session reasoning effort override.
       reasoning_effort?: string
+      chat_template_kwargs?: Record<string, unknown>
     }) => {
       let runProfile: string
       try {
@@ -399,6 +400,7 @@ export class ChatRunSocket {
             mcp_servers: data.mcp_servers,
             commandPassthrough: data.allow_command_passthrough,
             reasoningEffort: data.reasoning_effort,
+            chatTemplateKwargs: data.chat_template_kwargs,
             originSocketId: socket.id,
           })
           this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
@@ -625,6 +627,7 @@ export class ChatRunSocket {
       one_shot_model?: boolean
       allow_command_passthrough?: boolean
       reasoning_effort?: string
+      chat_template_kwargs?: Record<string, unknown>
       background_delegation_enabled?: boolean
       context_compression_enabled?: boolean
       background_delegation_id?: string
@@ -1128,6 +1131,7 @@ export class ChatRunSocket {
       one_shot_model: next.oneShotModel,
       allow_command_passthrough: next.commandPassthrough,
       reasoning_effort: next.reasoningEffort,
+      chat_template_kwargs: next.chatTemplateKwargs,
       background_delegation_id: next.backgroundDelegationId,
       background_claim_id: next.backgroundClaimId,
       autonomous: next.autonomous,
@@ -1167,6 +1171,7 @@ export class ChatRunSocket {
       mcp_servers?: Record<string, unknown>
       profile?: string
       reasoning_effort?: string
+      chat_template_kwargs?: Record<string, unknown>
       /** Hermes Agent creation policy used by internal orchestration callers. */
       background_delegation_enabled?: boolean
       context_compression_enabled?: boolean

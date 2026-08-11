@@ -78,6 +78,7 @@ export interface EkkoAgentRunSocketData {
   peerExcludeSocketId?: string
   queue_id?: string
   reasoning_effort?: string
+  chat_template_kwargs?: Record<string, unknown>
   background_delegation_enabled?: boolean
   background_delegation_id?: string
   autonomous?: boolean
@@ -1251,6 +1252,9 @@ export async function handleEkkoAgentRun(
         model: modelConfig.model,
         reasoningEffort,
         reasoningSummary: 'auto',
+        ...(data.chat_template_kwargs
+          ? { chatTemplateKwargs: data.chat_template_kwargs }
+          : {}),
       },
       messages: [
         ...instructionMessages,

@@ -12,7 +12,7 @@ import { useSettingsStore } from './settings'
 import { primeCompletionSound, playCompletionSound } from '@/utils/completion-sound'
 import { showCompletionNotification } from '@/utils/completion-notification'
 import { detectThinkingBoundary } from '@/utils/thinking-parser'
-import { normalizeReasoningEffortForProvider } from '@/utils/response-mode'
+import { chatTemplateKwargsForProvider } from '@/utils/response-mode'
 import { isKnownBridgeSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { responseErrorMessage } from '@/utils/http-error'
 import { deriveSessionStatus, type SessionStatus } from '@/utils/hermes/session-status'
@@ -3237,8 +3237,9 @@ export const useChatStore = defineStore('chat', () => {
         agentToCodingAgentId(activeSession.value?.agent) ||
         'claude-code'
       const codingAgentMode = activeSession.value?.codingAgentMode || 'scoped'
-      const normalizedSessionReasoningEffort = normalizeReasoningEffortForProvider(
-        activeSession.value?.reasoningEffort,
+      const sessionReasoningEffort = activeSession.value?.reasoningEffort || undefined
+      const chatTemplateKwargs = chatTemplateKwargsForProvider(
+        sessionReasoningEffort,
         sessionProvider,
         sessionModel,
       )
@@ -3287,7 +3288,8 @@ export const useChatStore = defineStore('chat', () => {
         // injecting a per-session override there.
         reasoning_effort: isCodingAgentExecution && codingAgentMode === 'global'
           ? undefined
-          : normalizedSessionReasoningEffort,
+          : sessionReasoningEffort,
+        ...(chatTemplateKwargs ? { chat_template_kwargs: chatTemplateKwargs } : {}),
       }
       if (shouldSendInitialSessionConfig && activeSession.value) {
         activeSession.value.messageCount = Math.max(activeSession.value.messageCount || 0, 1)

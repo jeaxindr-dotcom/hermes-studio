@@ -683,7 +683,8 @@ const knownCategoryIds = computed(() =>
 );
 const unassignedSessions = computed(() =>
   chatStore.sessions.filter((session) =>
-    session.categoryId == null || !knownCategoryIds.value.has(session.categoryId),
+    session.categoryId == null
+    || (sessionCategoriesLoaded.value && !knownCategoryIds.value.has(session.categoryId)),
   ),
 );
 
@@ -752,7 +753,8 @@ watch(
     const sidebarGroups = [...projectGroups.value, ...categorizedSessions.value];
     if (sidebarGroups.length === 0) return;
     const activeSession = chatStore.sessions.find((session) => session.id === chatStore.activeSessionId);
-    const activeKey = activeSession?.categoryId == null || !knownCategoryIds.value.has(activeSession.categoryId)
+    const activeKey = activeSession?.categoryId == null
+      || (sessionCategoriesLoaded.value && !knownCategoryIds.value.has(activeSession.categoryId))
       ? "category-none"
       : `category-${activeSession.categoryId}`;
     if (collapsedCategories.value.has(activeKey)) {
@@ -1491,6 +1493,28 @@ async function handleProjectDrop(event: DragEvent, categoryId: number) {
   } catch (error: any) {
     message.error(error?.message || t("chat.categoryUpdateFailed"));
   }
+}
+
+function projectIdFromKey(key: string): number | null {
+  if (!key.startsWith("category-")) return null;
+  const id = Number(key.slice("category-".length));
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function handleProjectDragOverKey(key: string) {
+  const categoryId = projectIdFromKey(key);
+  if (categoryId !== null) handleProjectDragOver(categoryId);
+}
+
+function handleProjectDragLeaveKey(event: DragEvent, key: string) {
+  const categoryId = projectIdFromKey(key);
+  if (categoryId !== null) handleProjectDragLeave(event, categoryId);
+}
+
+async function handleProjectDropKey(event: DragEvent, key: string) {
+  const categoryId = projectIdFromKey(key);
+  if (categoryId !== null) await handleProjectDrop(event, categoryId);
+  else event.preventDefault();
 }
 
 const showCategoryContextMenu = ref(false);
@@ -2257,10 +2281,10 @@ async function handleSessionModelCustomSubmit() {
           <template v-for="group in projectGroups" :key="group.key">
             <div
               class="project-group-drop-zone"
-              :class="{ 'drop-target': dragOverProjectId === Number(group.key.slice('category-'.length)) }"
-              @dragover.prevent="handleProjectDragOver(Number(group.key.slice('category-'.length)))"
-              @dragleave="handleProjectDragLeave($event, Number(group.key.slice('category-'.length)))"
-              @drop="handleProjectDrop($event, Number(group.key.slice('category-'.length)))"
+              :class="{ 'drop-target': dragOverProjectId === projectIdFromKey(group.key) }"
+              @dragover.prevent="handleProjectDragOverKey(group.key)"
+              @dragleave="handleProjectDragLeaveKey($event, group.key)"
+              @drop="handleProjectDropKey($event, group.key)"
             >
             <div
               class="project-group-header"
@@ -3837,6 +3861,9 @@ async function handleSessionModelCustomSubmit() {
     color: $text-primary;
     background: rgba(var(--accent-primary-rgb), 0.1);
     outline: none;
+  }
+
+  &:focus-visible {
     box-shadow: 0 0 0 2px rgba(var(--accent-primary-rgb), 0.35);
   }
 }
