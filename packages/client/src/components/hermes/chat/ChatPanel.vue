@@ -678,24 +678,30 @@ function sortSessionsForSidebar(items: Session[]): Session[] {
   });
 }
 
+const knownCategoryIds = computed(() =>
+  new Set(sessionCategories.value.map((category) => category.id)),
+);
+const unassignedSessions = computed(() =>
+  chatStore.sessions.filter((session) =>
+    session.categoryId == null || !knownCategoryIds.value.has(session.categoryId),
+  ),
+);
+
 const recentSessionPartition = computed(() => partitionRecentSessions(
   // Project sessions are rendered in their project tree, like Codex. Keep
   // Recent focused on conversations that are not already owned by a project.
-  chatStore.sessions.filter((session) => session.categoryId == null),
+  unassignedSessions.value,
   sessionBrowserPrefsStore.recentCount,
   t("chat.recent"),
 ));
 const recentSessions = computed(() => recentSessionPartition.value.group);
 const nonRecentSessions = computed(() => recentSessionPartition.value.remaining);
 
-const projectSessions = computed(() => {
-  const knownCategoryIds = new Set(sessionCategories.value.map((category) => category.id));
-  return sortSessionsForSidebar(
-    chatStore.sessions.filter((session) =>
-      session.categoryId != null && knownCategoryIds.has(session.categoryId),
-    ),
-  );
-});
+const projectSessions = computed(() => sortSessionsForSidebar(
+  chatStore.sessions.filter((session) =>
+    session.categoryId != null && knownCategoryIds.value.has(session.categoryId),
+  ),
+));
 
 const projectGroups = computed(() =>
   buildProjectGroups(sessionCategories.value, projectSessions.value),
@@ -737,13 +743,16 @@ function saveRecentCount() {
 watch(
   () => [
     sessionCategoriesLoaded.value,
+    projectGroups.value.map((group) => group.key).join("\u0000"),
     categorizedSessions.value.map((group) => group.key).join("\u0000"),
     chatStore.activeSessionId,
   ],
   () => {
-    if (!sessionCategoriesLoaded.value || categorizedSessions.value.length === 0) return;
+    if (!sessionCategoriesLoaded.value) return;
+    const sidebarGroups = [...projectGroups.value, ...categorizedSessions.value];
+    if (sidebarGroups.length === 0) return;
     const activeSession = chatStore.sessions.find((session) => session.id === chatStore.activeSessionId);
-    const activeKey = activeSession?.categoryId == null
+    const activeKey = activeSession?.categoryId == null || !knownCategoryIds.value.has(activeSession.categoryId)
       ? "category-none"
       : `category-${activeSession.categoryId}`;
     if (collapsedCategories.value.has(activeKey)) {
@@ -753,11 +762,11 @@ watch(
       persistCollapsedCategories();
     }
     if (localStorage.getItem(COLLAPSED_CATEGORIES_STORAGE_KEY) !== null) return;
-    const expandedKey = categorizedSessions.value.some((group) => group.key === activeKey)
+    const expandedKey = sidebarGroups.some((group) => group.key === activeKey)
       ? activeKey
-      : categorizedSessions.value[0]?.key;
+      : sidebarGroups[0]?.key;
     collapsedCategories.value = new Set(
-      categorizedSessions.value.map((group) => group.key).filter((key) => key !== expandedKey),
+      sidebarGroups.map((group) => group.key).filter((key) => key !== expandedKey),
     );
     persistCollapsedCategories();
   },
@@ -1458,6 +1467,13 @@ function handleSessionDragEnd() {
 function handleProjectDragOver(categoryId: number) {
   if (!draggedSessionId.value) return;
   dragOverProjectId.value = categoryId;
+}
+
+function handleProjectDragLeave(event: DragEvent, categoryId: number) {
+  const currentTarget = event.currentTarget;
+  const relatedTarget = event.relatedTarget;
+  if (currentTarget instanceof HTMLElement && relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) return;
+  if (dragOverProjectId.value === categoryId) dragOverProjectId.value = null;
 }
 
 async function handleProjectDrop(event: DragEvent, categoryId: number) {
@@ -2240,15 +2256,17 @@ async function handleSessionModelCustomSubmit() {
           </div>
           <template v-for="group in projectGroups" :key="group.key">
             <div
+              class="project-group-drop-zone"
+              :class="{ 'drop-target': dragOverProjectId === Number(group.key.slice('category-'.length)) }"
+              @dragover.prevent="handleProjectDragOver(Number(group.key.slice('category-'.length)))"
+              @dragleave="handleProjectDragLeave($event, Number(group.key.slice('category-'.length)))"
+              @drop="handleProjectDrop($event, Number(group.key.slice('category-'.length)))"
+            >
+            <div
               class="project-group-header"
-              :class="{
-                collapsed: collapsedCategories.has(group.key),
-                'drop-target': dragOverProjectId === Number(group.key.slice('category-'.length)),
-              }"
+              :class="{ collapsed: collapsedCategories.has(group.key) }"
               @click="toggleCategoryGroup(group.key)"
               @contextmenu="handleCategoryContextMenu($event, group.key)"
-              @dragover.prevent="handleProjectDragOver(Number(group.key.slice('category-'.length)))"
-              @drop="handleProjectDrop($event, Number(group.key.slice('category-'.length)))"
             >
               <svg class="project-folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h5l2 2H18.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" />
@@ -2306,6 +2324,7 @@ async function handleSessionModelCustomSubmit() {
                 />
               </div>
             </template>
+            </div>
           </template>
         </div>
 
@@ -3814,9 +3833,11 @@ async function handleSessionModelCustomSubmit() {
 
   &:hover,
   &:focus-visible {
+    opacity: 1;
     color: $text-primary;
     background: rgba(var(--accent-primary-rgb), 0.1);
     outline: none;
+    box-shadow: 0 0 0 2px rgba(var(--accent-primary-rgb), 0.35);
   }
 }
 
@@ -3825,6 +3846,28 @@ async function handleSessionModelCustomSubmit() {
   width: 24px;
   height: 24px;
   opacity: 1;
+}
+
+.project-group-drop-zone {
+  border-radius: $radius-sm;
+  transition: background $transition-fast, outline-color $transition-fast;
+
+  &.drop-target {
+    background: rgba(var(--accent-primary-rgb), 0.12);
+    outline: 1px solid rgba(var(--accent-primary-rgb), 0.45);
+
+    .project-group-header {
+      color: $text-primary;
+    }
+
+    .project-folder-icon {
+      color: var(--accent-primary);
+    }
+
+    .project-action-button {
+      opacity: 1;
+    }
+  }
 }
 
 .project-group-header {
@@ -3841,20 +3884,6 @@ async function handleSessionModelCustomSubmit() {
   &:hover {
     background: rgba(var(--accent-primary-rgb), 0.07);
     color: $text-primary;
-
-    .project-action-button {
-      opacity: 1;
-    }
-  }
-
-  &.drop-target {
-    color: $text-primary;
-    background: rgba(var(--accent-primary-rgb), 0.16);
-    outline: 1px solid rgba(var(--accent-primary-rgb), 0.5);
-
-    .project-folder-icon {
-      color: var(--accent-primary);
-    }
 
     .project-action-button {
       opacity: 1;

@@ -1618,11 +1618,18 @@ function isImage(type: string): boolean {
             {{ t('chat.attachFiles') }}
           </NTooltip>
 
-          <div class="response-mode-toggle" role="group" :aria-label="t('chat.responseMode.tooltip')">
+          <div
+            v-if="chatStore.activeSession && !isMoaSession"
+            class="response-mode-toggle"
+            role="radiogroup"
+            :aria-label="t('chat.responseMode.tooltip')"
+          >
             <button
               type="button"
               class="response-mode-option"
+              role="radio"
               :class="{ active: responseMode === 'fast' }"
+              :aria-checked="responseMode === 'fast'"
               :aria-pressed="responseMode === 'fast'"
               @click="setResponseMode('fast')"
             >
@@ -1636,7 +1643,9 @@ function isImage(type: string): boolean {
             <button
               type="button"
               class="response-mode-option"
+              role="radio"
               :class="{ active: responseMode === 'thinking' }"
+              :aria-checked="responseMode === 'thinking'"
               :aria-pressed="responseMode === 'thinking'"
               @click="setResponseMode('thinking')"
             >
