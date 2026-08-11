@@ -48,11 +48,13 @@ const workspaceSessionId = computed(() => {
 const workspacePath = computed(() => activeSession.value?.workspace || null)
 const activeProfile = computed(() => activeSession.value?.profile || profilesStore.activeProfileName || filesStore.currentProfile || null)
 const liveAutoFollowPath = ref('')
+const liveFollowSuppressed = ref(false)
 const liveEditing = computed(() => {
   const sessionId = workspaceSessionId.value
   return !!sessionId
     && chatStore.isSessionLive(sessionId)
     && !!latestWritePath.value
+    && !liveFollowSuppressed.value
 })
 let liveRefreshTimer: ReturnType<typeof setInterval> | null = null
 function editorFileName(tab: EditorTab): string {
@@ -108,20 +110,27 @@ function workspaceRelativePath(value: string): string {
 
 async function syncLiveEditor() {
   const sessionId = workspaceSessionId.value
-  if (!sessionId || !chatStore.isSessionLive(sessionId)) return
+  if (!sessionId || !chatStore.isSessionLive(sessionId) || liveFollowSuppressed.value) return
   const candidate = latestWritePath.value
-  if (candidate && (!filesStore.editingFile || liveAutoFollowPath.value)) {
-    const relativePath = workspaceRelativePath(candidate)
-    if (relativePath && relativePath !== filesStore.editingFile?.workspaceRelativePath) {
-      try {
-        await filesStore.openEditorTab(relativePath, { profile: activeProfile.value })
-        liveAutoFollowPath.value = relativePath
-      } catch {
-        // The file may not exist yet while the tool is still writing it.
-      }
+  const relativePath = candidate ? workspaceRelativePath(candidate) : ''
+  if (!relativePath) return
+
+  const activePath = filesStore.editingFile?.workspaceRelativePath || ''
+  if (activePath !== relativePath) {
+    const previousFollowPath = liveAutoFollowPath.value
+    liveAutoFollowPath.value = relativePath
+    try {
+      await filesStore.openEditorTab(relativePath, { profile: activeProfile.value })
+    } catch {
+      // The file may not exist yet while the tool is still writing it.
+      if (liveAutoFollowPath.value === relativePath) liveAutoFollowPath.value = previousFollowPath
+      return
     }
   }
-  if (filesStore.editingFile) await filesStore.refreshEditorFromWorkspace().catch(() => false)
+
+  if (filesStore.editingFile?.workspaceRelativePath === relativePath) {
+    await filesStore.refreshEditorFromWorkspace().catch(() => false)
+  }
 }
 
 const liveSignature = computed(() => `${chatStore.activeSessionId}:${chatStore.isSessionLive(chatStore.activeSessionId || '')}:${latestWritePath.value}`)
@@ -310,7 +319,14 @@ watch(terminalVisible, value => {
   localStorage.setItem(TERMINAL_VISIBLE_STORAGE_KEY, String(value))
 })
 
+watch(() => filesStore.editingFile?.workspaceRelativePath, (activePath, previousPath) => {
+  if (!liveAutoFollowPath.value || !previousPath || !activePath) return
+  if (activePath !== liveAutoFollowPath.value) liveFollowSuppressed.value = true
+})
+
 watch(workspaceSessionId, () => {
+  liveAutoFollowPath.value = ''
+  liveFollowSuppressed.value = false
   void requestWorkspaceBinding()
 })
 
