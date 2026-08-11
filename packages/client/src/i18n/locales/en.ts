@@ -282,6 +282,7 @@ export default {
     welcomeTab: 'Welcome',
     noFile: 'Open a file from the explorer',
     noFileHint: 'The Monaco editor and terminal use the active Hermes workspace directly.',
+    liveEditing: 'Writing live',
     terminal: 'Terminal',
     showTerminal: 'Show terminal',
     hideTerminal: 'Hide terminal',

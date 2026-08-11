@@ -47,10 +47,85 @@ const workspaceSessionId = computed(() => {
 })
 const workspacePath = computed(() => activeSession.value?.workspace || null)
 const activeProfile = computed(() => activeSession.value?.profile || profilesStore.activeProfileName || filesStore.currentProfile || null)
+const liveAutoFollowPath = ref('')
+const liveEditing = computed(() => {
+  const sessionId = workspaceSessionId.value
+  return !!sessionId
+    && chatStore.isSessionLive(sessionId)
+    && !!latestWritePath.value
+})
+let liveRefreshTimer: ReturnType<typeof setInterval> | null = null
 function editorFileName(tab: EditorTab): string {
   const path = tab.path || ''
   return path.split(/[\\/]/).pop() || path
 }
+
+function toolArguments(message: any): Record<string, unknown> {
+  const raw = message?.toolArgs
+  if (raw && typeof raw === 'object') return raw as Record<string, unknown>
+  if (typeof raw !== 'string') return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+function pathFromPatch(value: string): string {
+  const match = value.match(/\\*\\*\\*\\s+Update File:\s+(.+)$/m)
+  return match?.[1]?.trim() || ''
+}
+
+const latestWritePath = computed(() => {
+  const messages = activeSession.value?.messages || []
+  for (const message of [...messages].reverse()) {
+    const toolName = String(message.toolName || '').toLowerCase()
+    if (!['write_file', 'writefile', 'patch', 'apply_patch'].includes(toolName)) continue
+    const args = toolArguments(message)
+    const candidate = typeof args.path === 'string'
+      ? args.path
+      : typeof args.file_path === 'string'
+        ? args.file_path
+        : typeof args.patch === 'string'
+          ? pathFromPatch(args.patch)
+          : ''
+    if (candidate.trim()) return candidate.trim().replace(/\\/g, '/')
+  }
+  return ''
+})
+
+function workspaceRelativePath(value: string): string {
+  const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '')
+  const workspace = workspacePath.value?.replace(/\\/g, '/').replace(/\/$/, '') || ''
+  if (!workspace) return normalized
+  const lowerPath = normalized.toLowerCase()
+  const lowerWorkspace = workspace.toLowerCase()
+  if (lowerPath === lowerWorkspace) return ''
+  if (lowerPath.startsWith(`${lowerWorkspace}/`)) return normalized.slice(workspace.length + 1)
+  return normalized
+}
+
+async function syncLiveEditor() {
+  const sessionId = workspaceSessionId.value
+  if (!sessionId || !chatStore.isSessionLive(sessionId)) return
+  const candidate = latestWritePath.value
+  if (candidate && (!filesStore.editingFile || liveAutoFollowPath.value)) {
+    const relativePath = workspaceRelativePath(candidate)
+    if (relativePath && relativePath !== filesStore.editingFile?.workspaceRelativePath) {
+      try {
+        await filesStore.openEditorTab(relativePath, { profile: activeProfile.value })
+        liveAutoFollowPath.value = relativePath
+      } catch {
+        // The file may not exist yet while the tool is still writing it.
+      }
+    }
+  }
+  if (filesStore.editingFile) await filesStore.refreshEditorFromWorkspace().catch(() => false)
+}
+
+const liveSignature = computed(() => `${chatStore.activeSessionId}:${chatStore.isSessionLive(chatStore.activeSessionId || '')}:${latestWritePath.value}`)
+
 const workspaceStyle = computed(() => ({
   '--code-terminal-height': `${terminalHeight.value}px`,
 }))
@@ -243,13 +318,25 @@ watch(() => route.query.openFile, () => {
   void openRequestedFile()
 })
 
+watch(liveSignature, () => {
+  void syncLiveEditor()
+})
+
 onMounted(() => {
   appStore.setPageSidebarExpanded(true)
   document.title = `${t('code.title')} · Hermes Studio`
-  void initializeWorkspace().then(openRequestedFile)
+  liveRefreshTimer = setInterval(() => {
+    void syncLiveEditor()
+  }, 700)
+  void initializeWorkspace().then(async () => {
+    await openRequestedFile()
+    await syncLiveEditor()
+  })
 })
 
 onBeforeUnmount(() => {
+  if (liveRefreshTimer) clearInterval(liveRefreshTimer)
+  liveRefreshTimer = null
   appStore.setPageSidebarExpanded(false)
   stopTerminalResize()
   document.title = 'Hermes Studio'
@@ -295,6 +382,9 @@ onBeforeUnmount(() => {
             <strong>{{ t('code.title') }}</strong>
             <span :title="workspacePath || activeProfile || t('code.workspace')">
               {{ workspacePath || activeProfile || t('code.workspace') }}
+            </span>
+            <span v-if="liveEditing" class="code-live-editing" role="status">
+              <i aria-hidden="true" />{{ t('code.liveEditing') }}
             </span>
           </div>
         </div>
@@ -530,6 +620,30 @@ onBeforeUnmount(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
+
+.code-live-editing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: $accent-primary !important;
+  font-size: 10px !important;
+  font-weight: 600;
+
+  i {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.14);
+    animation: code-live-pulse 1.1s ease-in-out infinite;
+  }
+}
+
+@keyframes code-live-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
 }
 
 .code-workbench-actions {

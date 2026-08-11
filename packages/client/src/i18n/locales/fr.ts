@@ -294,6 +294,7 @@ export default {
     welcomeTab: 'Bienvenue',
     noFile: 'Ouvrez un fichier depuis l’explorateur',
     noFileHint: 'L’éditeur Monaco et le terminal utilisent directement l’espace de travail Hermes actif.',
+    liveEditing: 'Écriture en direct',
     terminal: 'Terminal',
     showTerminal: 'Afficher le terminal',
     hideTerminal: 'Masquer le terminal',

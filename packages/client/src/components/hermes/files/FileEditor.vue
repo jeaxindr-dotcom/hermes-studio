@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { NButton, NSpace, useMessage, useDialog } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore } from '@/stores/hermes/files'
@@ -57,6 +57,14 @@ onMounted(() => {
     handleSave()
   })
 })
+
+watch(
+  () => filesStore.editingFile?.content,
+  (content) => {
+    if (!editor || content === undefined || content === editor.getValue()) return
+    editor.setValue(content)
+  },
+)
 
 onBeforeUnmount(() => {
   editor?.dispose()

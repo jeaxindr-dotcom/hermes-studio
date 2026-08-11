@@ -326,6 +326,22 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
 
+  async function refreshEditorFromWorkspace(): Promise<boolean> {
+    const tab = editingFile.value
+    if (!tab || editorTabHasUnsavedChanges(tab)) return false
+    let result: { path: string; content: string }
+    if (tab.workspaceRoomId && tab.workspaceRelativePath) {
+      result = await readGroupWorkspaceFile(tab.workspaceRoomId, tab.workspaceRelativePath)
+    } else if (tab.workspaceSessionId && tab.workspaceRelativePath) {
+      result = await readSessionWorkspaceFile(tab.workspaceSessionId, tab.workspaceRelativePath)
+    } else {
+      result = await filesApi.readFile(tab.path, currentProfile.value)
+    }
+    if (result.content === tab.content) return false
+    tab.content = result.content
+    tab.originalContent = result.content
+    return true
+  }
   async function saveEditor() {
     if (!editingFile.value) return
     if (editingFile.value.workspaceRoomId && editingFile.value.workspaceRelativePath) {
@@ -550,7 +566,7 @@ export const useFilesStore = defineStore('files', () => {
     pathSegments, sortedEntries, hasUnsavedChanges, hasAnyUnsavedChanges,
     fetchEntries, clearWorkspaceScope, listEntries, fetchDirectory, navigateTo, navigateUp,
     openEditor, openEditorTab, editorTabKey, activateEditorTab, closeEditorTab, closeAllEditorTabs, editorTabHasUnsavedChanges,
-    openSessionWorkspaceEditor, openGroupWorkspaceEditor, saveEditor, closeEditor,
+    openSessionWorkspaceEditor, openGroupWorkspaceEditor, refreshEditorFromWorkspace, saveEditor, closeEditor,
     openPreview, openSessionWorkspacePreview, openGroupWorkspacePreview, openRemotePreview, closePreview,
     createDir, createFile, deleteEntry, renameEntry, copyEntry,
     uploadFiles, setSort,
