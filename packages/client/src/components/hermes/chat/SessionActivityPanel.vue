@@ -45,6 +45,7 @@ const streams = computed(() =>
 const runningAgents = computed(() => streams.value.filter(stream => stream.status === 'running').length)
 const completedTasks = computed(() => todoSnapshot.value?.summary.completed || 0)
 const totalTasks = computed(() => todoSnapshot.value?.summary.total || 0)
+const visibleTasks = computed(() => todoSnapshot.value?.items.slice(0, 3) || [])
 const taskProgress = computed(() =>
   totalTasks.value > 0 ? Math.round((completedTasks.value / totalTasks.value) * 100) : 0,
 )
@@ -200,7 +201,7 @@ function handleActivityWheel(event: WheelEvent) {
         </div>
         <div class="activity-list">
           <div
-            v-for="task in todoSnapshot.items"
+            v-for="task in visibleTasks"
             :key="task.id"
             class="activity-task-row"
             :class="`activity-task-row--${task.status}`"
@@ -263,6 +264,8 @@ function handleActivityWheel(event: WheelEvent) {
 @use "@/styles/variables" as *;
 
 .session-activity-panel {
+  height: 232px;
+  box-sizing: border-box;
   margin-top: 10px;
   overflow: hidden;
   border: 1px solid $border-light;
@@ -334,7 +337,8 @@ function handleActivityWheel(event: WheelEvent) {
 }
 
 .activity-content {
-  max-height: 196px;
+  height: 196px;
+  box-sizing: border-box;
   overflow: auto;
   overscroll-behavior: contain;
   padding: 8px;
@@ -378,9 +382,14 @@ function handleActivityWheel(event: WheelEvent) {
   gap: 2px;
 }
 
+.activity-task-content {
+  overflow: hidden;
+}
+
 .activity-task-row {
   min-width: 0;
   min-height: 24px;
+  max-height: 40px;
   display: flex;
   align-items: flex-start;
   gap: 7px;
