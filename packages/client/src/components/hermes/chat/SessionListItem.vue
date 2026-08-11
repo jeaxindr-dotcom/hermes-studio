@@ -140,6 +140,8 @@ onUnmounted(() => {
     class="session-item"
     :class="{ active, 'batch-mode': selectable, 'missing-models': profileModelsMissing }"
     :aria-current="active ? 'page' : undefined"
+    :data-session-id="session.id"
+    :draggable="!selectable"
     :href="!selectable ? to : undefined"
     :type="selectable || !to ? 'button' : undefined"
     @click="onClick"
@@ -227,6 +229,14 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.session-item[draggable="true"] {
+  cursor: grab;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
 .session-item {
   position: relative;
   display: flex;

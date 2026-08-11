@@ -18,6 +18,24 @@ export interface VisibleSessionCategoryGroup<T> {
   sessions: T[];
 }
 
+/**
+ * Project navigation needs to keep empty projects visible. The older
+ * session-category grouping intentionally omitted empty groups because it was
+ * designed for the compact conversation history list. Codex-style project
+ * navigation has a different contract: the folder exists independently from
+ * whether it already contains a conversation.
+ */
+export function buildProjectGroups<T extends SessionCategoryAssignment>(
+  categories: readonly SessionCategoryLike[],
+  sessions: readonly T[],
+): VisibleSessionCategoryGroup<T>[] {
+  return categories.map((category) => ({
+    key: `category-${category.id}`,
+    label: category.name,
+    sessions: sessions.filter((session) => session.categoryId === category.id),
+  }));
+}
+
 export interface RecentSessionPartition<T> {
   group: VisibleSessionCategoryGroup<T>;
   remaining: T[];

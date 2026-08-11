@@ -49,7 +49,7 @@ import SessionListItem from "./SessionListItem.vue";
 import OutlinePanel from "./OutlinePanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
-import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
+import { buildProjectGroups, buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
 import SettingsCircuitBadge from "@/components/layout/SettingsCircuitBadge.vue";
 import { isStoredSuperAdmin } from "@/api/client";
@@ -679,12 +679,27 @@ function sortSessionsForSidebar(items: Session[]): Session[] {
 }
 
 const recentSessionPartition = computed(() => partitionRecentSessions(
-  chatStore.sessions,
+  // Project sessions are rendered in their project tree, like Codex. Keep
+  // Recent focused on conversations that are not already owned by a project.
+  chatStore.sessions.filter((session) => session.categoryId == null),
   sessionBrowserPrefsStore.recentCount,
   t("chat.recent"),
 ));
 const recentSessions = computed(() => recentSessionPartition.value.group);
 const nonRecentSessions = computed(() => recentSessionPartition.value.remaining);
+
+const projectSessions = computed(() => {
+  const knownCategoryIds = new Set(sessionCategories.value.map((category) => category.id));
+  return sortSessionsForSidebar(
+    chatStore.sessions.filter((session) =>
+      session.categoryId != null && knownCategoryIds.has(session.categoryId),
+    ),
+  );
+});
+
+const projectGroups = computed(() =>
+  buildProjectGroups(sessionCategories.value, projectSessions.value),
+);
 
 const pinnedSessions = computed(() =>
   sortSessionsForSidebar(
@@ -703,7 +718,7 @@ const unpinnedSessions = computed(() =>
 );
 
 const categorizedSessions = computed(() => buildVisibleSessionCategoryGroups(
-  sessionCategories.value,
+  [],
   unpinnedSessions.value,
   t("chat.uncategorized"),
 ));
@@ -1177,9 +1192,11 @@ async function openNewChatModal() {
   try {
     await loadSessionCategories();
     if (profilesStore.profiles.length === 0) await profilesStore.fetchProfiles();
-    if (appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0) {
-      await appStore.loadModels();
-    }
+    // Provider configuration can change while Studio stays open. Always refresh
+    // the profile-scoped model groups when opening New Chat so newly added
+    // custom providers (for example a local OpenAI-compatible runtime) are not
+    // hidden behind the previous in-memory catalog.
+    await appStore.reloadModels({ preserveSelection: true });
     newChatProfile.value =
       profilesStore.activeProfileName ||
       profilesStore.profiles.find((profile) => profile.active)?.name ||
@@ -1419,6 +1436,47 @@ const contextSession = computed(() =>
     : null,
 );
 
+const draggedSessionId = ref<string | null>(null);
+const dragOverProjectId = ref<number | null>(null);
+
+function handleSessionDragStart(event: DragEvent) {
+  const target = event.target instanceof HTMLElement
+    ? event.target.closest<HTMLElement>("[data-session-id]")
+    : null;
+  const sessionId = target?.dataset.sessionId || null;
+  if (!sessionId || !event.dataTransfer) return;
+  draggedSessionId.value = sessionId;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", sessionId);
+}
+
+function handleSessionDragEnd() {
+  draggedSessionId.value = null;
+  dragOverProjectId.value = null;
+}
+
+function handleProjectDragOver(categoryId: number) {
+  if (!draggedSessionId.value) return;
+  dragOverProjectId.value = categoryId;
+}
+
+async function handleProjectDrop(event: DragEvent, categoryId: number) {
+  event.preventDefault();
+  const sessionId = event.dataTransfer?.getData("text/plain") || draggedSessionId.value;
+  draggedSessionId.value = null;
+  dragOverProjectId.value = null;
+  if (!sessionId) return;
+  const session = chatStore.sessions.find((item) => item.id === sessionId);
+  if (!session || session.categoryId === categoryId) return;
+  try {
+    if (!session.isLocalOnly) await setSessionCategory(session.id, categoryId);
+    session.categoryId = categoryId;
+    message.success(t("chat.projectUpdated"));
+  } catch (error: any) {
+    message.error(error?.message || t("chat.categoryUpdateFailed"));
+  }
+}
+
 const showCategoryContextMenu = ref(false);
 const categoryContextMenuX = ref(0);
 const categoryContextMenuY = ref(0);
@@ -1434,10 +1492,7 @@ const showRenameCategoryModal = ref(false);
 const renameCategoryValue = ref("");
 const showDeleteCategoryModal = ref(false);
 
-function handleCategoryContextMenu(event: MouseEvent, groupKey: string) {
-  if (groupKey === "category-none") return;
-  const categoryId = Number(groupKey.slice("category-".length));
-  if (!Number.isSafeInteger(categoryId)) return;
+function showCategoryContextMenuAt(event: MouseEvent, categoryId: number) {
   event.preventDefault();
   event.stopPropagation();
   showContextMenu.value = false;
@@ -1445,6 +1500,25 @@ function handleCategoryContextMenu(event: MouseEvent, groupKey: string) {
   categoryContextMenuX.value = event.clientX;
   categoryContextMenuY.value = event.clientY;
   showCategoryContextMenu.value = true;
+}
+
+function handleCategoryContextMenu(event: MouseEvent, groupKey: string) {
+  if (groupKey === "category-none") return;
+  const categoryId = Number(groupKey.slice("category-".length));
+  if (!Number.isSafeInteger(categoryId)) return;
+  showCategoryContextMenuAt(event, categoryId);
+}
+
+function openCategoryActions(event: MouseEvent, categoryId: number) {
+  showCategoryContextMenuAt(event, categoryId);
+}
+
+function openCategoryRename(categoryId: number) {
+  const category = sessionCategories.value.find((item) => item.id === categoryId);
+  if (!category) return;
+  categoryContextId.value = categoryId;
+  renameCategoryValue.value = category.name;
+  showRenameCategoryModal.value = true;
 }
 
 function handleCategoryContextMenuSelect(key: string) {
@@ -1459,11 +1533,25 @@ function handleCategoryContextMenuSelect(key: string) {
   }
 }
 
+function openCreateProjectModal() {
+  categoryContextId.value = null;
+  renameCategoryValue.value = "";
+  showRenameCategoryModal.value = true;
+}
+
 async function handleRenameCategoryConfirm() {
   const categoryId = categoryContextId.value;
   const name = renameCategoryValue.value.trim().replace(/\s+/g, " ");
-  if (!categoryId || !name) return false;
+  if (!name) return false;
   try {
+    if (!categoryId) {
+      const category = await createSessionCategory(name);
+      sessionCategories.value = [...sessionCategories.value, category]
+        .sort((a, b) => a.name.localeCompare(b.name));
+      message.success(t("chat.projectCreated", { name: category.name }));
+      showRenameCategoryModal.value = false;
+      return true;
+    }
     const category = await renameSessionCategory(categoryId, name);
     sessionCategories.value = sessionCategories.value
       .map((item) => item.id === category.id ? category : item)
@@ -1471,7 +1559,7 @@ async function handleRenameCategoryConfirm() {
     message.success(t("chat.categoryRenamed"));
     showRenameCategoryModal.value = false;
   } catch (error: any) {
-    message.error(error?.message || t("chat.categoryRenameFailed"));
+    message.error(error?.message || (categoryId ? t("chat.categoryRenameFailed") : t("chat.categoryCreateFailed")));
     return false;
   }
 }
@@ -1997,6 +2085,21 @@ async function handleSessionModelCustomSubmit() {
             :loading="profilesStore.loading"
             @update:value="handleProfileFilterChange"
           />
+          <NButton
+            quaternary
+            size="tiny"
+            class="new-project-button"
+            :title="t('chat.newProject')"
+            :aria-label="t('chat.newProject')"
+            @click="openCreateProjectModal"
+          >
+            <template #icon>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h5l2 2H18.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" />
+                <path d="M12 10v6M9 13h6" />
+              </svg>
+            </template>
+          </NButton>
           <div class="session-list-actions">
             <button class="session-close-btn" @click="showSessions = false">
               <svg
@@ -2104,7 +2207,12 @@ async function handleSessionModelCustomSubmit() {
           </div>
         </div>
       </div>
-      <div v-if="showSessions" class="session-items">
+      <div
+        v-if="showSessions"
+        class="session-items"
+        @dragstart="handleSessionDragStart"
+        @dragend="handleSessionDragEnd"
+      >
         <div
           v-if="chatStore.isLoadingSessions && chatStore.sessions.length === 0"
           class="session-loading"
@@ -2113,6 +2221,92 @@ async function handleSessionModelCustomSubmit() {
         </div>
         <div v-else-if="chatStore.sessions.length === 0" class="session-empty">
           {{ t("chat.noSessions") }}
+        </div>
+
+        <div v-if="projectGroups.length > 0" class="projects-section">
+          <div class="projects-section-header">
+            <span class="projects-section-label">{{ t("chat.projects") }}</span>
+            <button
+              class="projects-add-button"
+              type="button"
+              :title="t('chat.newProject')"
+              :aria-label="t('chat.newProject')"
+              @click="openCreateProjectModal"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+          <template v-for="group in projectGroups" :key="group.key">
+            <div
+              class="project-group-header"
+              :class="{
+                collapsed: collapsedCategories.has(group.key),
+                'drop-target': dragOverProjectId === Number(group.key.slice('category-'.length)),
+              }"
+              @click="toggleCategoryGroup(group.key)"
+              @contextmenu="handleCategoryContextMenu($event, group.key)"
+              @dragover.prevent="handleProjectDragOver(Number(group.key.slice('category-'.length)))"
+              @drop="handleProjectDrop($event, Number(group.key.slice('category-'.length)))"
+            >
+              <svg class="project-folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h5l2 2H18.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" />
+              </svg>
+              <span class="project-group-label">{{ group.label }}</span>
+              <span class="project-group-count">{{ group.sessions.length }}</span>
+              <button
+                class="project-action-button"
+                type="button"
+                :title="t('chat.renameCategory')"
+                :aria-label="t('chat.renameCategory')"
+                @click.stop="openCategoryRename(Number(group.key.slice('category-'.length)))"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" />
+                </svg>
+              </button>
+              <button
+                class="project-action-button"
+                type="button"
+                :title="t('chat.projectActions')"
+                :aria-label="t('chat.projectActions')"
+                @click.stop="openCategoryActions($event, Number(group.key.slice('category-'.length)))"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" />
+                </svg>
+              </button>
+            </div>
+            <template v-if="!collapsedCategories.has(group.key)">
+              <div v-if="group.sessions.length === 0" class="project-empty-state">
+                {{ t("chat.projectEmpty") }}
+              </div>
+              <div v-else class="project-session-list">
+                <SessionListItem
+                  v-for="s in group.sessions"
+                  :key="`project-${group.key}-${s.id}`"
+                  :session="s"
+                  :active="s.id === chatStore.activeSessionId"
+                  :pinned="false"
+                  :can-delete="s.id !== chatStore.activeSessionId || chatStore.sessions.length > 1"
+                  :streaming="chatStore.isSessionLive(s.id)"
+                  :status="chatStore.getSessionStatus(s.id)"
+                  :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
+                  :selectable="isBatchMode"
+                  :selected="isSessionSelected(s)"
+                  :show-profile="true"
+                  :to="sessionHref(s.id)"
+                  :intercept-modified-navigation="desktopChatWindowAvailable"
+                  @select="handleSessionClick(s.id)"
+                  @open-new="openSessionInNewTab(s.id)"
+                  @contextmenu="handleContextMenu($event, s.id)"
+                  @delete="handleDeleteSession(s.id)"
+                  @toggle-select="toggleSessionSelection(s)"
+                />
+              </div>
+            </template>
+          </template>
         </div>
 
         <template v-if="recentSessions.sessions.length > 0">
@@ -2295,14 +2489,14 @@ async function handleSessionModelCustomSubmit() {
     <NModal
       v-model:show="showRenameCategoryModal"
       preset="dialog"
-      :title="t('chat.renameCategory')"
+      :title="categoryContextId ? t('chat.renameCategory') : t('chat.newProject')"
       :positive-text="t('common.ok')"
       :negative-text="t('common.cancel')"
       @positive-click="handleRenameCategoryConfirm"
     >
       <NInput
         v-model:value="renameCategoryValue"
-        :placeholder="t('chat.enterCategoryName')"
+        :placeholder="categoryContextId ? t('chat.enterCategoryName') : t('chat.newProjectName')"
         :maxlength="40"
         @keydown.enter="handleRenameCategoryConfirm"
       />
@@ -3423,6 +3617,12 @@ async function handleSessionModelCustomSubmit() {
   margin-top: 12px;
 }
 
+.new-project-button {
+  flex: 0 0 auto;
+  color: $text-secondary;
+  border-radius: 999px;
+}
+
 .session-list-actions {
   display: flex;
   align-items: center;
@@ -3577,6 +3777,144 @@ async function handleSessionModelCustomSubmit() {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.projects-section {
+  margin: 4px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba($border-color, 0.7);
+}
+
+.projects-section-header {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px 4px;
+}
+
+.projects-section-label {
+  color: $text-muted;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.45px;
+}
+
+.projects-add-button,
+.project-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: $text-muted;
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity $transition-fast, color $transition-fast, background $transition-fast;
+
+  &:hover,
+  &:focus-visible {
+    color: $text-primary;
+    background: rgba(var(--accent-primary-rgb), 0.1);
+    outline: none;
+  }
+}
+
+.projects-add-button {
+  margin-inline-start: auto;
+  width: 24px;
+  height: 24px;
+  opacity: 1;
+}
+
+.project-group-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 4px 6px;
+  border-radius: $radius-sm;
+  color: $text-secondary;
+  cursor: pointer;
+  user-select: none;
+
+  &:hover {
+    background: rgba(var(--accent-primary-rgb), 0.07);
+    color: $text-primary;
+
+    .project-action-button {
+      opacity: 1;
+    }
+  }
+
+  &.drop-target {
+    color: $text-primary;
+    background: rgba(var(--accent-primary-rgb), 0.16);
+    outline: 1px solid rgba(var(--accent-primary-rgb), 0.5);
+
+    .project-folder-icon {
+      color: var(--accent-primary);
+    }
+
+    .project-action-button {
+      opacity: 1;
+    }
+  }
+
+  &.collapsed .project-folder-icon {
+    opacity: 0.8;
+  }
+}
+
+.project-folder-icon {
+  flex: 0 0 auto;
+  color: var(--accent-primary);
+}
+
+.project-group-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.project-group-count {
+  flex: 0 0 auto;
+  color: $text-muted;
+  font-size: 10px;
+}
+
+.project-action-button {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-inline-start: 0;
+  padding: 0;
+
+  &:first-of-type {
+    margin-inline-start: auto;
+  }
+}
+
+.project-empty-state {
+  margin: 0 8px 4px 29px;
+  color: $text-muted;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 20px;
+}
+
+.project-session-list {
+  margin: 0 0 3px 16px;
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid rgba(var(--accent-primary-rgb), 0.2);
+
+  :deep(.session-item) {
+    min-height: 40px;
+    padding-inline-start: 8px;
+  }
 }
 
 .session-group-header {

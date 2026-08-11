@@ -34,6 +34,11 @@ import { BRIDGE_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-sessio
 import { clampChatInputHeight, isMobileChatInputViewport } from '@/utils/chat-input-height'
 import { isDesktopShell } from '@/utils/desktop-bridge'
 import { isMobileDevice } from '@/utils/device'
+import {
+  reasoningEffortForResponseMode,
+  responseModeFromReasoningEffort,
+  type ResponseMode,
+} from '@/utils/response-mode'
 
 const chatStore = useChatStore()
 const appStore = useAppStore()
@@ -68,6 +73,9 @@ const reasoningEffortOptions = computed(() => [
 const currentReasoningEffort = computed<string>(() =>
   chatStore.activeSession?.reasoningEffort || ''
 )
+const responseMode = computed<ResponseMode>(() =>
+  responseModeFromReasoningEffort(currentReasoningEffort.value),
+)
 const reasoningEffortSliderValue = computed(() => {
   const index = reasoningEffortOptions.value.findIndex(option => option.value === currentReasoningEffort.value)
   return index >= 0 ? index : 0
@@ -97,6 +105,14 @@ function onReasoningEffortChange(value: string | null | undefined) {
   const sid = chatStore.activeSessionId
   if (!sid) return
   chatStore.setSessionReasoningEffort(sid, value || '')
+}
+function setResponseMode(mode: ResponseMode) {
+  const sid = chatStore.activeSessionId
+  if (!sid || responseMode.value === mode) return
+  chatStore.setSessionReasoningEffort(
+    sid,
+    reasoningEffortForResponseMode(mode, currentReasoningEffort.value),
+  )
 }
 function reasoningEffortSliderLabel(value: number) {
   return reasoningEffortOptions.value[Math.round(value)]?.label || reasoningEffortLabel.value
@@ -1602,6 +1618,38 @@ function isImage(type: string): boolean {
             {{ t('chat.attachFiles') }}
           </NTooltip>
 
+          <div class="response-mode-toggle" role="group" :aria-label="t('chat.responseMode.tooltip')">
+            <button
+              type="button"
+              class="response-mode-option"
+              :class="{ active: responseMode === 'fast' }"
+              :aria-pressed="responseMode === 'fast'"
+              @click="setResponseMode('fast')"
+            >
+              <span class="response-mode-icon" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 2 4.5 13h6L10 22l9.5-12h-6z" />
+                </svg>
+              </span>
+              {{ t('chat.responseMode.fast') }}
+            </button>
+            <button
+              type="button"
+              class="response-mode-option"
+              :class="{ active: responseMode === 'thinking' }"
+              :aria-pressed="responseMode === 'thinking'"
+              @click="setResponseMode('thinking')"
+            >
+              <span class="response-mode-icon" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m12 3 1.45 5.55L19 10l-5.55 1.45L12 17l-1.45-5.55L5 10l5.55-1.45z" />
+                  <path d="m19 16 .55 2.45L22 19l-2.45.55L19 22l-.55-2.45L16 19l2.45-.55z" />
+                </svg>
+              </span>
+              {{ t('chat.responseMode.thinking') }}
+            </button>
+          </div>
+
           <NPopover
             v-if="!isMoaSession"
             trigger="click"
@@ -2154,6 +2202,51 @@ function isImage(type: string): boolean {
   &--off {
     color: #f59b45;
   }
+}
+
+.response-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.response-mode-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  color: $text-secondary;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    color: $text-primary;
+  }
+
+  &.active {
+    color: $text-primary;
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+.response-mode-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: currentColor;
+  line-height: 1;
 }
 
 .reasoning-effort-button {

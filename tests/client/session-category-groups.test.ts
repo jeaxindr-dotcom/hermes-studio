@@ -1,12 +1,28 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildProjectGroups,
   buildRecentSessionCategoryGroup,
   buildVisibleSessionCategoryGroups,
   partitionRecentSessions,
 } from '../../packages/client/src/components/hermes/chat/session-category-groups'
 
 describe('session category groups', () => {
+  it('keeps empty projects visible for the project navigator', () => {
+    const groups = buildProjectGroups(
+      [
+        { id: 1, name: 'Work' },
+        { id: 2, name: 'Empty' },
+      ],
+      [{ id: 'session-1', categoryId: 1 }],
+    )
+
+    expect(groups.map((group) => [group.key, group.label, group.sessions.length])).toEqual([
+      ['category-1', 'Work', 1],
+      ['category-2', 'Empty', 0],
+    ])
+  })
+
   it('hides categories that have no visible sessions', () => {
     const groups = buildVisibleSessionCategoryGroups(
       [
