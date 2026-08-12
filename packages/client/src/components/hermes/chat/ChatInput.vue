@@ -988,6 +988,16 @@ interface PendingContextSave {
 
 let pendingContextSave: PendingContextSave | null = null
 
+function flushPendingContextSave() {
+  if (contextSaveTimer) {
+    clearTimeout(contextSaveTimer)
+    contextSaveTimer = null
+  }
+  const pending = pendingContextSave
+  pendingContextSave = null
+  if (pending) void saveContextLimit(pending.limit, pending.target)
+}
+
 const contextSliderIndex = computed(() => contextLimitSliderIndex(editingContextLimit.value))
 const contextSliderLabel = (value: number) =>
   contextLimitLabel(contextLimitFromSliderIndex(value))
@@ -1043,8 +1053,15 @@ async function saveContextLimit(
 }
 
 function scheduleContextLimitSave() {
-  if (contextSaveTimer) clearTimeout(contextSaveTimer)
+  // A different profile/model must not cancel an earlier target's pending save.
+  // Repeated moves for the same target still debounce normally.
   const target = currentContextSaveTarget()
+  if (pendingContextSave && (!target || pendingContextSave.target.key !== target.key)) {
+    flushPendingContextSave()
+  } else if (contextSaveTimer) {
+    clearTimeout(contextSaveTimer)
+  }
+  if (!target) return
   pendingContextSave = target
     ? { target, limit: normalizeContextLength(editingContextLimit.value) }
     : null
@@ -1066,13 +1083,7 @@ function onContextSliderChange(value: number | [number, number]) {
 
 function handleContextPickerVisibility(show: boolean) {
   showContextPicker.value = show
-  if (!show && contextSaveTimer) {
-    clearTimeout(contextSaveTimer)
-    contextSaveTimer = null
-    const pending = pendingContextSave
-    pendingContextSave = null
-    if (pending) void saveContextLimit(pending.limit, pending.target)
-  }
+  if (!show) flushPendingContextSave()
 }
 
 function currentContextLengthParams() {
@@ -1575,8 +1586,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('mousedown', onDocumentMousedown)
   window.removeEventListener('resize', syncViewport)
-  if (contextSaveTimer) clearTimeout(contextSaveTimer)
-  pendingContextSave = null
+  flushPendingContextSave()
   if (activeVoiceCaptureMode.value === 'local') {
     localStreamGeneration += 1
     localPcmRecorder.cancel()

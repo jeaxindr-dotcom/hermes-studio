@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 function runPython(script: string): any {
   try {
-    return JSON.parse(execFileSync('python3', ['-c', script], {
+    return JSON.parse(execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script], {
       cwd: process.cwd(),
       encoding: 'utf-8',
       stdio: 'pipe',
@@ -96,9 +96,11 @@ class FakeAIAgent:
         self.model = kwargs.get("model")
         self.provider = kwargs.get("provider")
         self.reasoning_config = kwargs.get("reasoning_config")
+        self.request_overrides = {"extra_body": {"existing": True}}
         self.tools = []
         self.raise_on_run = False
         self.run_reasoning_configs = []
+        self.run_request_overrides = []
 
     def switch_model(self, **kwargs):
         self.model = kwargs["new_model"]
@@ -106,6 +108,7 @@ class FakeAIAgent:
 
     def run_conversation(self, _message, **_kwargs):
         self.run_reasoning_configs.append(dict(self.reasoning_config or {}))
+        self.run_request_overrides.append(dict(self.request_overrides or {}))
         if self.raise_on_run:
             raise RuntimeError("run failed")
         return {"final_response": "ok", "messages": []}
@@ -263,6 +266,64 @@ print(json.dumps({
       session_id: 's-1',
       reasoning_effort: 'max',
     }))
+  })
+
+  it('forwards chat template kwargs to Agent Bridge chat requests', async () => {
+    const { AgentBridgeClient } = await import('../../packages/server/src/services/hermes/agent-bridge/client')
+    const client = new AgentBridgeClient({ endpoint: 'tcp://127.0.0.1:1', connectRetryMs: 0, timeoutMs: 1 })
+    const request = vi.spyOn(client, 'request').mockResolvedValue({
+      ok: true,
+      run_id: 'r-tq3-fast',
+      session_id: 's-tq3-fast',
+      status: 'running',
+    })
+
+    await client.chat('s-tq3-fast', 'hello', undefined, undefined, 'default', {
+      chat_template_kwargs: { enable_thinking: false },
+    })
+
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'chat',
+      chat_template_kwargs: { enable_thinking: false },
+    }))
+  })
+
+  it('applies chat template kwargs only for the active bridge run', () => {
+    const result = runPython(`${reasoningHarness}
+session = pool.get_or_create("tq3-fast", model="gpt-5.6-luna")
+pool._enter_exec_ask_scope = lambda: None
+pool._exit_exec_ask_scope = lambda: None
+pool._install_approval_dispatcher_for_current_thread = lambda *_args: None
+pool._approval_callback = lambda *_args: None
+pool._prepersist_user_message = lambda *_args: None
+pool._session_db_message_count = lambda *_args: None
+pool._prepend_pending_model_switch_note = lambda _session, message: message
+pool._sync_result_tail_to_session_db = lambda *_args: None
+pool._result_from_agent_messages_for_sync = lambda *_args: None
+pool._apply_pending_session_model_switch = lambda *_args: None
+before = dict(session.agent.request_overrides)
+session.running = True
+run = bridge_pool.RunRecord("tq3", session.session_id)
+pool._run_chat(
+    session,
+    run,
+    "hello",
+    chat_template_kwargs={"enable_thinking": False},
+)
+print(json.dumps({
+    "before": before,
+    "during": session.agent.run_request_overrides,
+    "after": session.agent.request_overrides,
+}))
+`)
+
+    expect(result.during).toEqual([{
+      extra_body: {
+        existing: true,
+        chat_template_kwargs: { enable_thinking: false },
+      },
+    }])
+    expect(result.after).toEqual(result.before)
   })
 
   it('omits reasoning_effort entirely when the option is not set', async () => {

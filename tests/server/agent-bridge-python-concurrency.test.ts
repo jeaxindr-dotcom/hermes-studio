@@ -3,7 +3,7 @@ import { describe, it } from 'vitest'
 
 function runPython(script: string): void {
   try {
-    execFileSync('python3', ['-c', script], {
+    execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script], {
       cwd: process.cwd(),
       encoding: 'utf-8',
       stdio: 'pipe',
@@ -363,8 +363,8 @@ ${harness}
 captured = []
 
 class FakePool:
-    def start_chat(self, *args):
-        captured.append(args)
+    def start_chat(self, *args, **kwargs):
+        captured.append({"args": args, "kwargs": kwargs})
         return bridge.RunRecord(run_id=f"run-{len(captured)}", session_id=args[0])
 
     def estimate_context(self, *args, **kwargs):
@@ -379,6 +379,7 @@ disabled = server.handle({
     "session_id": "session-disabled",
     "message": "hello",
     "background_delegation_enabled": False,
+    "chat_template_kwargs": {"enable_thinking": False, "unexpected": "drop-me"},
 })
 enabled = server.handle({
     "action": "chat",
@@ -393,8 +394,10 @@ estimated = server.handle({
 
 assert disabled["status"] == "running"
 assert enabled["status"] == "running"
-assert captured[0][-1] is False
-assert captured[1][-1] is None
+assert captured[0]["kwargs"]["background_delegation_enabled"] is False
+assert captured[0]["kwargs"]["chat_template_kwargs"] == {"enable_thinking": False}
+assert captured[1]["kwargs"]["background_delegation_enabled"] is None
+assert captured[1]["kwargs"]["chat_template_kwargs"] is None
 assert estimated["session_id"] == "session-estimate-disabled"
 assert captured[2]["background_delegation_enabled"] is False
 `)

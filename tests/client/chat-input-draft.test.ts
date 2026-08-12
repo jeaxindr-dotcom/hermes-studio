@@ -311,6 +311,57 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.get('.context-limit-editable').text()).toContain('256.0k')
   })
 
+  it('persists pending context selections for both sessions during a rapid switch', async () => {
+    const wrapper = mountForSession('session-context-a', {
+      profile: 'profile-a',
+      provider: 'provider-a',
+      model: 'model-a',
+    })
+    const store = useChatStore()
+    await nextTick()
+
+    await wrapper.get('.context-limit-slider').setValue('8')
+    store.sessions = [{
+      ...store.sessions[0],
+      id: 'session-context-b',
+      title: 'session-context-b',
+      profile: 'profile-b',
+      provider: 'provider-b',
+      model: 'model-b',
+    }]
+    store.activeSessionId = 'session-context-b'
+    store.activeSession = store.sessions[0]
+    await nextTick()
+    await wrapper.get('.context-limit-slider').setValue('7')
+    await new Promise(resolve => setTimeout(resolve, 220))
+    await flushPromises()
+
+    expect(setModelContextMock.mock.calls).toEqual(expect.arrayContaining([
+      ['provider-a', 'model-a', 1_000_000, 'profile-a'],
+      ['provider-b', 'model-b', 512_000, 'profile-b'],
+    ]))
+  })
+
+  it('flushes a pending context selection before the composer unmounts', async () => {
+    const wrapper = mountForSession('session-context-unmount', {
+      profile: 'profile-a',
+      provider: 'provider-a',
+      model: 'model-a',
+    })
+    await nextTick()
+
+    await wrapper.get('.context-limit-slider').setValue('8')
+    wrapper.unmount()
+    await flushPromises()
+
+    expect(setModelContextMock).toHaveBeenCalledWith(
+      'provider-a',
+      'model-a',
+      1_000_000,
+      'profile-a',
+    )
+  })
+
   it('shows reasoning effort selector for coding-agent sessions', async () => {
     const wrapper = mountForSession('session-codex', {
       source: 'coding_agent',

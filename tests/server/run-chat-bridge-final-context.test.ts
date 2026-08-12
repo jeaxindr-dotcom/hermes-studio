@@ -239,7 +239,12 @@ describe('bridge run final context usage', () => {
     await handleBridgeRun(
       nsp,
       socket,
-      { input: 'hello again', session_id: 'session-1', queue_id: 'mcu-test-run' },
+      {
+        input: 'hello again',
+        session_id: 'session-1',
+        queue_id: 'mcu-test-run',
+        chat_template_kwargs: { enable_thinking: false },
+      },
       'default',
       sessionMap,
       bridge,
@@ -270,6 +275,16 @@ describe('bridge run final context usage', () => {
       output: 'done',
       queue_id: 'mcu-test-run',
     }))
+    expect(bridge.chat).toHaveBeenCalledWith(
+      'session-1',
+      expect.anything(),
+      expect.any(Array),
+      expect.any(String),
+      'default',
+      expect.objectContaining({
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+    )
   })
 
   it('does not prepend the Studio guidance a second time when the caller already composed it', async () => {

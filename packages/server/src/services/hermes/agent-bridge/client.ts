@@ -56,6 +56,8 @@ export interface AgentBridgeChatOptions {
   /** Local patch (reasoning-effort): per-session reasoning effort override.
    * Empty/undefined = use config.yaml default. */
   reasoning_effort?: string
+  /** OpenAI-compatible chat-template arguments, applied only to this run. */
+  chat_template_kwargs?: Record<string, unknown>
 }
 
 export type AgentBridgeMessage =
@@ -510,6 +512,7 @@ export class AgentBridgeClient {
         : {}),
       // Local patch (reasoning-effort): per-session reasoning effort override.
       ...(options.reasoning_effort ? { reasoning_effort: options.reasoning_effort } : {}),
+      ...(options.chat_template_kwargs ? { chat_template_kwargs: options.chat_template_kwargs } : {}),
     })
   }
 

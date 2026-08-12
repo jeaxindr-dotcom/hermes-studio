@@ -77,20 +77,27 @@ class BridgeServer:
             )
             # Local patch (reasoning-effort): per-session reasoning effort override (Web UI brain button).
             reasoning_effort = req.get("reasoning_effort")
+            raw_chat_template_kwargs = req.get("chat_template_kwargs")
+            chat_template_kwargs = None
+            if isinstance(raw_chat_template_kwargs, dict):
+                enable_thinking = raw_chat_template_kwargs.get("enable_thinking")
+                if isinstance(enable_thinking, bool):
+                    chat_template_kwargs = {"enable_thinking": enable_thinking}
             record = self.pool.start_chat(
                 session_id,
                 message,
-                storage_message,
-                instructions,
-                conversation_history,
-                profile,
-                bool(req.get("force_compress")),
-                model,
-                provider,
-                workspace,
-                source,
-                reasoning_effort,
-                background_delegation_enabled,
+                storage_message=storage_message,
+                instructions=instructions,
+                conversation_history=conversation_history,
+                profile=profile,
+                force_compress=bool(req.get("force_compress")),
+                model=model,
+                provider=provider,
+                workspace=workspace,
+                source=source,
+                reasoning_effort=reasoning_effort,
+                chat_template_kwargs=chat_template_kwargs,
+                background_delegation_enabled=background_delegation_enabled,
             )
             if req.get("wait"):
                 timeout = float(req.get("timeout", 0) or 0)

@@ -1456,6 +1456,7 @@ class AgentPool:
         workspace: str | None = None,
         source: str | None = None,
         reasoning_effort: str | None = None,
+        chat_template_kwargs: dict[str, Any] | None = None,
         background_delegation_enabled: bool | None = None,
     ) -> RunRecord:
         session = self.get_or_create(
@@ -1490,14 +1491,14 @@ class AgentPool:
 
         thread = threading.Thread(
             target=self._run_chat,
-            args=(session, record, message, storage_message, instructions, conversation_history, profile, force_compress, workspace, source, reasoning_effort),
+            args=(session, record, message, storage_message, instructions, conversation_history, profile, force_compress, workspace, source, reasoning_effort, chat_template_kwargs),
             daemon=True,
             name=f"hermes-bridge-run-{run_id[:8]}",
         )
         thread.start()
         return record
 
-    def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None) -> None:
+    def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None, chat_template_kwargs: dict[str, Any] | None = None) -> None:
         with _profile_env(profile):
             _refresh_approval_allowlist()
             _install_execute_code_approval_memory_patch()
@@ -1582,6 +1583,8 @@ class AgentPool:
                 # Mutates session.agent.reasoning_config in place — restored after run.
                 _saved_reasoning_config = None
                 _did_override_reasoning = False
+                _saved_request_overrides = None
+                _did_override_request = False
                 if reasoning_effort:
                     try:
                         from hermes_constants import parse_reasoning_effort
@@ -1595,6 +1598,14 @@ class AgentPool:
                     except Exception:
                         # Non-fatal: fall through to default reasoning_config
                         pass
+                if isinstance(chat_template_kwargs, dict) and chat_template_kwargs:
+                    _saved_request_overrides = getattr(session.agent, "request_overrides", None)
+                    request_overrides = dict(_saved_request_overrides or {})
+                    extra_body = dict(request_overrides.get("extra_body") or {})
+                    extra_body["chat_template_kwargs"] = dict(chat_template_kwargs)
+                    request_overrides["extra_body"] = extra_body
+                    session.agent.request_overrides = request_overrides
+                    _did_override_request = True
                 try:
                     result = session.agent.run_conversation(
                         agent_message,
@@ -1603,6 +1614,8 @@ class AgentPool:
                 finally:
                     if _did_override_reasoning:
                         session.agent.reasoning_config = _saved_reasoning_config
+                    if _did_override_request:
+                        session.agent.request_overrides = _saved_request_overrides
                 result = _jsonable(result if isinstance(result, dict) else {"value": result})
                 result_for_tail_sync = result
                 self._sync_result_tail_to_session_db(
