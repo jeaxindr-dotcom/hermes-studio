@@ -28,6 +28,9 @@ const props = withDefaults(defineProps<{
   approvalPortalToBody: false,
   scrollScope: "chat",
 })
+const emit = defineEmits<{
+  (event: "steer", message: Pick<Message, "id" | "content">): void
+}>()
 
 const chatStore = useChatStore();
 const { t } = useI18n();
@@ -345,6 +348,10 @@ function removeQueuedMessage(messageId: string) {
   const sid = chatStore.activeSessionId;
   if (!sid) return;
   chatStore.removeQueuedMessage(sid, messageId);
+}
+
+function requestSteering(message: Pick<Message, "id" | "content">) {
+  emit("steer", message);
 }
 
 function queuedPreview(content: string): string {
@@ -958,6 +965,21 @@ defineExpose({
               <span></span>
             </span>
             <span>{{ t('chat.messageQueue') }}</span>
+            <NButton
+              quaternary
+              size="small"
+              class="queue-steer-button"
+              :aria-label="t('chat.steer')"
+              @click.stop="requestSteering(queuedMessages[0])"
+            >
+              <template #icon>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 12h13" />
+                  <path d="m13 6 6 6-6 6" />
+                </svg>
+              </template>
+              {{ t('chat.steer') }}
+            </NButton>
             <strong>{{ queuedMessages.length }}</strong>
           </div>
           <div class="queue-float-list">
@@ -1182,6 +1204,27 @@ defineExpose({
     border-radius: 999px;
     background: rgba(var(--accent-info-rgb), 0.16);
     color: var(--accent-info);
+  }
+}
+
+.queue-steer-button {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.34);
+  border-radius: 8px;
+  color: var(--accent-primary);
+  background: rgba(var(--accent-primary-rgb), 0.08);
+
+  :deep(.n-button__content) {
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  &:hover,
+  &:focus-visible {
+    background: rgba(var(--accent-primary-rgb), 0.16);
   }
 }
 

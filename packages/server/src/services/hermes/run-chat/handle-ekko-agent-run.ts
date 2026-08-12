@@ -100,6 +100,11 @@ function resolveReasoningEffort(value: unknown): ModelReasoningEffort {
   return normalizeReasoningEffort(value) ?? 'medium'
 }
 
+function isTq3Runtime(provider: string, model: string): boolean {
+  const target = `${provider} ${model}`.toLowerCase()
+  return target.includes('tq3') || target.includes('r2-deepseek-v4-flash')
+}
+
 function parseJsonRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
@@ -441,7 +446,18 @@ export async function handleEkkoAgentRun(
   const baseUrl = runtimeConfig.baseUrl || ''
   const apiMode = runtimeConfig.apiMode
   const apiKey = runtimeConfig.apiKey
-  const reasoningEffort = resolveReasoningEffort(data.reasoning_effort)
+  const tq3FastMode = isTq3Runtime(modelConfig.provider, modelConfig.model)
+    && (
+      String(data.reasoning_effort || '').trim() === 'none'
+      || data.chat_template_kwargs?.enable_thinking === false
+    )
+  // TQ3's no-thinking path is controlled by chat_template_kwargs. Sending
+  // reasoning_effort=none as well makes llama.cpp emit inline <think>, which
+  // the peg-native parser rejects.
+  const reasoningEffort = tq3FastMode ? undefined : resolveReasoningEffort(data.reasoning_effort)
+  const chatTemplateKwargs = data.chat_template_kwargs || (tq3FastMode
+    ? { enable_thinking: false }
+    : undefined)
   const agent = getGlobalEkkoAgent(profile)
   const workspace = data.workspace || storedSession?.workspace || agent.sessionWorkspaceDirectory(sessionId)
   const shouldEmitWorkspaceUpdate = Boolean(workspace && !storedSession?.workspace)
@@ -1252,8 +1268,8 @@ export async function handleEkkoAgentRun(
         model: modelConfig.model,
         reasoningEffort,
         reasoningSummary: 'auto',
-        ...(data.chat_template_kwargs
-          ? { chatTemplateKwargs: data.chat_template_kwargs }
+        ...(chatTemplateKwargs
+          ? { chatTemplateKwargs }
           : {}),
       },
       messages: [

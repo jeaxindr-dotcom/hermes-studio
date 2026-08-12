@@ -12,7 +12,7 @@ import { useSettingsStore } from './settings'
 import { primeCompletionSound, playCompletionSound } from '@/utils/completion-sound'
 import { showCompletionNotification } from '@/utils/completion-notification'
 import { detectThinkingBoundary } from '@/utils/thinking-parser'
-import { chatTemplateKwargsForProvider } from '@/utils/response-mode'
+import { chatTemplateKwargsForProvider, reasoningEffortForProvider } from '@/utils/response-mode'
 import { isKnownBridgeSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { responseErrorMessage } from '@/utils/http-error'
 import { deriveSessionStatus, type SessionStatus } from '@/utils/hermes/session-status'
@@ -87,6 +87,15 @@ export interface Message {
   commandData?: Record<string, unknown>
   finishReason?: string | null
   runMarker?: string | null
+}
+
+interface SendMessageOptions {
+  /** Command payload sent to the bridge while keeping a different UI message. */
+  transportInput?: string
+  /** Optional content shown in the transcript instead of the transport payload. */
+  displayContent?: string
+  /** Optional display role for command-backed messages. */
+  displayRole?: 'user' | 'command'
 }
 
 export type SubagentStreamStatus =
@@ -2604,6 +2613,7 @@ export const useChatStore = defineStore('chat', () => {
       clearMessageReference(sid)
       if ((evt as any).clearHistory) {
         const message = String((evt as any).message || '')
+        if ((evt as any).silent === true && (evt as any).ok !== false) return
         if (message) {
           addMessage(sid, {
             id: uid(),
@@ -2679,6 +2689,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     const message = String((evt as any).message || '')
+    if ((evt as any).silent === true && (evt as any).ok !== false) return
     if (message) {
       addMessage(sid, {
         id: uid(),
@@ -3103,12 +3114,13 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  async function sendMessage(content: string, attachments?: Attachment[]) {
+  async function sendMessage(content: string, attachments?: Attachment[], options?: SendMessageOptions) {
     if ((!content.trim() && !(attachments && attachments.length > 0))) return
 
     primeNotificationSoundIfEnabled()
 
     const trimmedContent = content.trim()
+    const transportContent = options?.transportInput?.trim() || trimmedContent
 
     if (!activeSession.value) {
       const session = createSession()
@@ -3122,18 +3134,19 @@ export const useChatStore = defineStore('chat', () => {
       ? activeSession.value.messageCount == null || activeSession.value.messageCount === 0
       : false
     const isCodingAgentSession = isCodingAgentLikeSession(activeSession.value)
-    const isBridgeSlashCommand = !isCodingAgentSession && isKnownBridgeSessionCommand(trimmedContent)
-    const isBridgeCompressCommand = isBridgeSlashCommand && /^\/compress(?:\s|$)/i.test(trimmedContent)
-    const isBridgePlanCommand = isBridgeSlashCommand && /^\/plan(?:\s|$)/i.test(trimmedContent)
-    const isBridgeSkillCommand = isBridgeSlashCommand && /^\/skill(?:\s|$)/i.test(trimmedContent)
-    const isBridgeBundleCommand = isBridgeSlashCommand && /^\/bundles(?:\s|$)/i.test(trimmedContent)
-    const isBridgeMoaCommand = isBridgeSlashCommand && /^\/moa(?:\s|$)/i.test(trimmedContent)
-    const isBridgeGoalCommand = isBridgeSlashCommand && /^\/goal(?:\s|$)/i.test(trimmedContent)
-    const isBridgeForkCommand = isBridgeSlashCommand && /^\/fork(?:\s|$)/i.test(trimmedContent)
+    const isBridgeSlashCommand = !isCodingAgentSession && isKnownBridgeSessionCommand(transportContent)
+    const isBridgeCompressCommand = isBridgeSlashCommand && /^\/compress(?:\s|$)/i.test(transportContent)
+    const isBridgePlanCommand = isBridgeSlashCommand && /^\/plan(?:\s|$)/i.test(transportContent)
+    const isBridgeSkillCommand = isBridgeSlashCommand && /^\/skill(?:\s|$)/i.test(transportContent)
+    const isBridgeBundleCommand = isBridgeSlashCommand && /^\/bundles(?:\s|$)/i.test(transportContent)
+    const isBridgeMoaCommand = isBridgeSlashCommand && /^\/moa(?:\s|$)/i.test(transportContent)
+    const isBridgeGoalCommand = isBridgeSlashCommand && /^\/goal(?:\s|$)/i.test(transportContent)
+    const isBridgeForkCommand = isBridgeSlashCommand && /^\/fork(?:\s|$)/i.test(transportContent)
     const messageReference = isBridgeSlashCommand ? null : messageReferences.value.get(sid) || null
     const submittedContent = messageReference
-      ? formatMessageWithReference(messageReference, trimmedContent)
-      : trimmedContent
+      ? formatMessageWithReference(messageReference, transportContent)
+      : transportContent
+    const displayContent = options?.displayContent ?? submittedContent
     const shouldOptimisticallyShowRunStatus = !isCodingAgentSession && !isBridgeForkCommand
     const wasLiveBeforeSend = isSessionLive(sid)
     if (isBridgeForkCommand) {
@@ -3153,12 +3166,14 @@ export const useChatStore = defineStore('chat', () => {
 
     const userMsg: Message = {
       id: uid(),
-      role: isBridgeSlashCommand ? 'command' : 'user',
-      content: submittedContent,
+      role: options?.displayRole || (isBridgeSlashCommand ? 'command' : 'user'),
+      content: displayContent,
       timestamp: Date.now(),
       attachments: attachments && attachments.length > 0 ? attachments : undefined,
       queued: shouldQueue,
-      systemType: isBridgeSlashCommand ? 'command' : undefined,
+      systemType: options?.displayRole
+        ? (options.displayRole === 'command' ? 'command' : undefined)
+        : isBridgeSlashCommand ? 'command' : undefined,
     }
 
     if (shouldQueue) {
@@ -3237,9 +3252,14 @@ export const useChatStore = defineStore('chat', () => {
         agentToCodingAgentId(activeSession.value?.agent) ||
         'claude-code'
       const codingAgentMode = activeSession.value?.codingAgentMode || 'scoped'
-      const sessionReasoningEffort = activeSession.value?.reasoningEffort || undefined
+      const rawSessionReasoningEffort = activeSession.value?.reasoningEffort || undefined
+      const sessionReasoningEffort = reasoningEffortForProvider(
+        rawSessionReasoningEffort,
+        sessionProvider,
+        sessionModel,
+      )
       const chatTemplateKwargs = chatTemplateKwargsForProvider(
-        sessionReasoningEffort,
+        rawSessionReasoningEffort,
         sessionProvider,
         sessionModel,
       )
@@ -4856,6 +4876,24 @@ export const useChatStore = defineStore('chat', () => {
   onSessionTitleUpdated(applyGeneratedSessionTitle)
   onSessionWorkspaceUpdated(applySessionWorkspaceUpdate)
 
+  async function sendSteerMessage(content: string) {
+    const text = content.trim()
+    if (!text) return
+    return sendMessage(text, undefined, {
+      transportInput: `/steer ${text}`,
+      displayContent: text,
+      displayRole: 'user',
+    })
+  }
+
+  async function steerQueuedMessage(sessionId: string, messageId: string, content: string) {
+    const text = content.trim()
+    if (!sessionId || !messageId || !text) return
+    if (activeSessionId.value !== sessionId) return
+    removeQueuedMessage(sessionId, messageId)
+    return sendSteerMessage(text)
+  }
+
   function stopStreaming() {
     const sid = activeSessionId.value
     if (!sid) return
@@ -5089,6 +5127,8 @@ export const useChatStore = defineStore('chat', () => {
     deleteSession,
     archiveSession,
     sendMessage,
+    sendSteerMessage,
+    steerQueuedMessage,
     stopStreaming,
     respondApproval,
     respondApprovalFor,

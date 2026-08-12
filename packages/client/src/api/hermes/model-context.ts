@@ -28,13 +28,15 @@ export async function getModelContext(provider: string, model: string): Promise<
 export async function setModelContext(
   provider: string,
   model: string,
-  contextLimit: number
+  contextLimit: number,
+  profile?: string,
 ): Promise<ModelContext> {
   const res = await request<{ success: boolean; data: ModelContext }>(
     `/api/hermes/model-context/${encodeURIComponent(provider)}/${encodeURIComponent(model)}`,
     {
       method: 'PUT',
       body: JSON.stringify({ provider, model, context_limit: contextLimit }),
+      ...(profile ? { profile } : {}),
     }
   )
   return res.data

@@ -532,6 +532,51 @@ describe('ekko-agent context usage events', () => {
     }))
   })
 
+  it('keeps TQ3 Fast mode disabled when the client omits reasoning_effort', async () => {
+    getSessionMock.mockReturnValue({
+      id: 'session-1',
+      profile: 'default',
+      source: 'coding_agent',
+      agent: 'ekko-agent',
+      model: 'deepseek-v4-flash-r2-tq3_4s',
+      provider: 'deepseek-tq3',
+      workspace: '/tmp/workspace',
+    })
+    resolveBridgeRunModelConfigMock.mockResolvedValueOnce({
+      model: 'deepseek-v4-flash-r2-tq3_4s',
+      provider: 'deepseek-tq3',
+    })
+    resolveEkkoProviderRuntimeConfigMock.mockResolvedValueOnce({
+      provider: 'deepseek-tq3',
+      apiMode: 'chat_completions',
+    })
+    agentRunMock.mockResolvedValueOnce({
+      runId: 'run-tq3-fast',
+      output: { role: 'assistant', content: 'done' },
+      steps: [],
+      messages: [],
+      events: [],
+      contextEstimate: { contextTokens: 5_000 },
+    })
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/services/hermes/run-chat/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap } = makeHarness()
+
+    await handleEkkoAgentRun(nsp as any, socket as any, {
+      session_id: 'session-1',
+      input: 'answer directly',
+      coding_agent_id: 'ekko-agent',
+      chat_template_kwargs: { enable_thinking: false },
+    }, 'default', sessionMap, vi.fn(() => false))
+
+    expect(agentRunMock).toHaveBeenCalledWith(expect.objectContaining({
+      reasoningEffort: undefined,
+      modelDefaults: expect.objectContaining({
+        reasoningEffort: undefined,
+        chatTemplateKwargs: { enable_thinking: false },
+      }),
+    }))
+  })
+
   it('does not publish step context estimates as formal usage updates', async () => {
     agentRunMock.mockImplementationOnce(async (input: any) => {
       input.onEvent({ type: 'run.started', runId: 'run-1', maxSteps: 3 })

@@ -438,6 +438,12 @@ function handleBrowserAttachment(payload: { file: File; context: string }) {
   chatInputRef.value?.addBrowserAttachment?.(payload.file, payload.context);
 }
 
+function handleMessageListSteer(message: { id: string; content: string }) {
+  const sessionId = chatStore.activeSessionId;
+  if (!sessionId) return;
+  void chatStore.steerQueuedMessage(sessionId, message.id, message.content);
+}
+
 async function handleSessionClick(sessionId: string) {
   chatStore.clearSessionCompletedUnread(sessionId);
   await router.push({
@@ -3119,6 +3125,7 @@ async function handleSessionModelCustomSubmit() {
               ref="messageListRef"
               :approval-portal-to-body="showRealtimeVoice"
               scroll-scope="chat"
+              @steer="handleMessageListSteer"
             />
             <ChatInput
               ref="chatInputRef"

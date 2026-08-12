@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   chatTemplateKwargsForProvider,
+  reasoningEffortForProvider,
   reasoningEffortForResponseMode,
   responseModeFromReasoningEffort,
 } from '@/utils/response-mode'
@@ -40,5 +41,14 @@ describe('response mode', () => {
       .toBeUndefined()
     expect(chatTemplateKwargsForProvider('none', 'openai-codex', 'gpt-5.6-luna'))
       .toBeUndefined()
+  })
+
+  it('omits none reasoning_effort for TQ3 Fast mode', () => {
+    expect(reasoningEffortForProvider('none', 'deepseek-tq3', 'deepseek-v4-flash-r2-tq3_4s'))
+      .toBeUndefined()
+    expect(reasoningEffortForProvider('low', 'deepseek-tq3', 'deepseek-v4-flash-r2-tq3_4s'))
+      .toBe('low')
+    expect(reasoningEffortForProvider('none', 'openai-codex', 'gpt-5.6-luna'))
+      .toBe('none')
   })
 })

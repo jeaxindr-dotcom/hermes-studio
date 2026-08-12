@@ -37,3 +37,18 @@ export function chatTemplateKwargsForProvider(
   }
   return undefined
 }
+
+/** llama.cpp-tq3 must not receive reasoning_effort=none alongside its
+ * chat-template no-thinking switch; omit the OpenAI reasoning field entirely. */
+export function reasoningEffortForProvider(
+  effort?: string | null,
+  provider?: string | null,
+  model?: string | null,
+): string | undefined {
+  const normalizedEffort = effort?.trim() || ''
+  const target = `${provider || ''} ${model || ''}`.toLowerCase()
+  const isTq3Runtime = target.includes('tq3')
+    || target.includes('r2-deepseek-v4-flash')
+  if (isTq3Runtime && normalizedEffort === 'none') return undefined
+  return normalizedEffort || undefined
+}

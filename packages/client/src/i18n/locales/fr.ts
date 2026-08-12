@@ -681,6 +681,9 @@ export default {
       fast: 'Rapide',
       thinking: 'Réflexion',
     },
+    steer: 'Orienter',
+    steerTooltip: 'Envoyer cette consigne à l’exécution en cours au prochain point de reprise',
+    steerUnavailable: 'Disponible pendant une exécution active',
     authorizationMode: {
       tooltip: 'Autorisation des commandes',
       options: {

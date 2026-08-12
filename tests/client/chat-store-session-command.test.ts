@@ -195,6 +195,99 @@ describe('chat store session.command fanout', () => {
     )
   })
 
+  it('renders a steer instruction as a normal user message while sending the bridge command internally', async () => {
+    const store = useChatStore()
+    const session = makeSession()
+    session.source = 'cli'
+    session.messageCount = 2
+    store.sessions = [session]
+    store.activeSessionId = 'session-1'
+    store.activeSession = session
+
+    await store.sendSteerMessage('réoriente la réponse vers le point principal')
+
+    expect(store.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: 'réoriente la réponse vers le point principal',
+        systemType: undefined,
+      }),
+    ])
+    expect(chatApi.startRunViaSocket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: '/steer réoriente la réponse vers le point principal',
+        session_id: 'session-1',
+      }),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      undefined,
+      expect.any(Object),
+    )
+  })
+
+  it('does not add a command bubble for a silent steer acknowledgement', () => {
+    const store = useChatStore()
+    const session = makeSession()
+    store.sessions = [session]
+    store.activeSessionId = 'session-1'
+    store.activeSession = session
+
+    chatApi.sessionCommandHandlers[0]({
+      event: 'session.command',
+      session_id: 'session-1',
+      command: 'steer',
+      action: 'steer',
+      message: 'Steer instruction sent.',
+      silent: true,
+      terminal: false,
+    })
+
+    expect(store.messages).toEqual([])
+  })
+
+  it('converts the selected queued message into a normal visible steer message', async () => {
+    const store = useChatStore()
+    const session = makeSession()
+    session.source = 'cli'
+    store.sessions = [session]
+    store.activeSessionId = 'session-1'
+    store.activeSession = session
+
+    chatApi.sessionCommandHandlers[0]({
+      event: 'session.command',
+      session_id: 'session-1',
+      command: 'status',
+      action: 'status',
+      started: true,
+      terminal: false,
+    })
+    store.queuedUserMessages = new Map([[
+      'session-1',
+      [{ id: 'queue-1', role: 'user', content: 'dfasfdsa', timestamp: 1, queued: true }],
+    ]])
+
+    await store.steerQueuedMessage('session-1', 'queue-1', 'dfasfdsa')
+
+    expect(store.queuedUserMessages.get('session-1')).toBeUndefined()
+    expect(store.messages).toEqual([
+      expect.objectContaining({
+        id: expect.any(String),
+        role: 'user',
+        content: 'dfasfdsa',
+        systemType: undefined,
+      }),
+    ])
+    expect(chatApi.startRunViaSocket).toHaveBeenCalledWith(
+      expect.objectContaining({ input: '/steer dfasfdsa', session_id: 'session-1' }),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      undefined,
+      expect.any(Object),
+    )
+  })
+
   it('does not show a thinking/streaming state while submitting terminal fork commands', async () => {
     const store = useChatStore()
     const session = makeSession()

@@ -837,7 +837,7 @@ export async function handleSessionCommand(
         return
       }
       await ctx.bridge.steer(sessionId, command.args)
-      emitCommand({ action: 'steer', terminal: false, message: 'Steer instruction sent.' })
+      emitCommand({ action: 'steer', terminal: false, silent: true, message: 'Steer instruction sent.' })
       return
     }
 

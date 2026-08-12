@@ -9,7 +9,7 @@ import { fetchContextLength } from '@/api/hermes/sessions'
 import { setModelContext } from '@/api/hermes/model-context'
 import { fetchSkills, type SkillCategory, type SkillInfo } from '@/api/hermes/skills'
 import { deleteSkillBundleApi, fetchSkillBundles, type SkillBundleInfo } from '@/api/hermes/skill-bundles'
-import { NButton, NTooltip, NModal, NInputNumber, NPopover, NSlider, NDropdown, useDialog, useMessage, type DropdownOption } from 'naive-ui'
+import { NButton, NTooltip, NModal, NPopover, NSlider, NDropdown, useDialog, useMessage, type DropdownOption } from 'naive-ui'
 import { computed, ref, nextTick, onMounted, onUnmounted, watch, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToolTraceVisibility } from '@/composables/useToolTraceVisibility'
@@ -39,6 +39,14 @@ import {
   responseModeFromReasoningEffort,
   type ResponseMode,
 } from '@/utils/response-mode'
+import {
+  CONTEXT_LIMIT_OPTIONS,
+  MAX_CONTEXT_LIMIT,
+  MIN_CONTEXT_LIMIT,
+  contextLimitFromSliderIndex,
+  contextLimitLabel,
+  contextLimitSliderIndex,
+} from '@/utils/context-limit'
 
 const chatStore = useChatStore()
 const appStore = useAppStore()
@@ -457,6 +465,7 @@ const bridgeCommands = computed<SlashCommandOption[]>(() =>
 const slashActive = ref(false)
 const slashQuery = ref('')
 const slashActiveIndex = ref(0)
+const steeringMode = ref(false)
 const skillCategories = ref<SkillCategory[]>([])
 const showSkillPicker = ref(false)
 const skillSearch = ref('')
@@ -813,15 +822,16 @@ function scrollCommandIntoView() {
   })
 }
 
-function updateSlashState() {
+function updateSlashState(sourceElement: HTMLTextAreaElement | null | undefined = textareaRef.value) {
   if (!isBridgeSession.value && !isForkCommandSession.value) {
     slashActive.value = false
     return
   }
-  const el = textareaRef.value
+  const el = sourceElement
   if (!el) return
   const cursorPos = el.selectionStart
-  const beforeCursor = inputText.value.slice(0, cursorPos)
+  const value = el.value
+  const beforeCursor = value.slice(0, cursorPos)
   if (!beforeCursor.startsWith('/') || beforeCursor.includes(' ') || beforeCursor.includes('\n')) {
     slashActive.value = false
     return
@@ -958,49 +968,126 @@ let contextLengthRequestKey = ''
 let contextLengthRequest: Promise<void> | null = null
 
 // Context length editing
-const showContextEditModal = ref(false)
+const showContextPicker = ref(false)
 const editingContextLimit = ref(256000)
 const isSavingContextLimit = ref(false)
+let contextSaveTimer: ReturnType<typeof setTimeout> | null = null
+let contextSaveRequestId = 0
 
-async function handleEditContextLimit() {
-  editingContextLimit.value = contextLength.value
-  showContextEditModal.value = true
+interface ContextSaveTarget {
+  profile: string
+  provider: string
+  model: string
+  key: string
 }
 
-async function saveContextLimit() {
-  if (!editingContextLimit.value || editingContextLimit.value <= 0) {
+interface PendingContextSave {
+  target: ContextSaveTarget
+  limit: number
+}
+
+let pendingContextSave: PendingContextSave | null = null
+
+const contextSliderIndex = computed(() => contextLimitSliderIndex(editingContextLimit.value))
+const contextSliderLabel = (value: number) =>
+  contextLimitLabel(contextLimitFromSliderIndex(value))
+
+function normalizeContextLength(value: number): number {
+  if (!Number.isFinite(value)) return FALLBACK_CONTEXT
+  return Math.min(Math.max(Math.round(value), MIN_CONTEXT_LIMIT), MAX_CONTEXT_LIMIT)
+}
+
+function handleEditContextLimit() {
+  editingContextLimit.value = contextLength.value
+}
+
+function currentContextSaveTarget(): ContextSaveTarget | null {
+  const profile = chatStore.activeSession?.profile || profilesStore.activeProfileName || 'default'
+  const provider = chatStore.activeSession?.provider || appStore.selectedProvider || ''
+  const model = chatStore.activeSession?.model || appStore.selectedModel || ''
+  if (!provider || !model) return null
+  return { profile, provider, model, key: `${profile}|${provider}|${model}` }
+}
+
+async function saveContextLimit(
+  requestedValue = editingContextLimit.value,
+  target = currentContextSaveTarget(),
+) {
+  const requestedLimit = normalizeContextLength(requestedValue)
+  if (!requestedLimit || requestedLimit <= 0) {
     message.error(t('chat.contextEditInvalid'))
     return
   }
 
+  if (!target) {
+    message.error(t('chat.contextEditFailed'))
+    return
+  }
+  if (currentContextLengthKey() === target.key) {
+    editingContextLimit.value = requestedLimit
+  }
+
+  const requestId = ++contextSaveRequestId
   isSavingContextLimit.value = true
   try {
-    const provider = chatStore.activeSession?.provider || appStore.selectedProvider || ''
-    const model = chatStore.activeSession?.model || appStore.selectedModel || ''
-
-    if (!provider || !model) {
-      message.error(t('chat.contextEditFailed'))
-      return
-    }
-
-    await setModelContext(provider, model, editingContextLimit.value)
-    contextLength.value = editingContextLimit.value
-    contextLengthLoadedKey = currentContextLengthKey()
-    showContextEditModal.value = false
-    message.success(t('chat.contextEditSuccess'))
+    await setModelContext(target.provider, target.model, requestedLimit, target.profile)
+    if (requestId !== contextSaveRequestId) return
+    if (currentContextLengthKey() !== target.key) return
+    contextLength.value = requestedLimit
+    contextLengthLoadedKey = target.key
   } catch (err: any) {
     message.error(`${t('chat.contextEditFailed')}: ${err.message || ''}`)
   } finally {
-    isSavingContextLimit.value = false
+    if (requestId === contextSaveRequestId) isSavingContextLimit.value = false
+  }
+}
+
+function scheduleContextLimitSave() {
+  if (contextSaveTimer) clearTimeout(contextSaveTimer)
+  const target = currentContextSaveTarget()
+  pendingContextSave = target
+    ? { target, limit: normalizeContextLength(editingContextLimit.value) }
+    : null
+  contextSaveTimer = setTimeout(() => {
+    contextSaveTimer = null
+    const pending = pendingContextSave
+    pendingContextSave = null
+    if (pending) void saveContextLimit(pending.limit, pending.target)
+  }, 180)
+}
+
+function onContextSliderChange(value: number | [number, number]) {
+  const numericValue = Array.isArray(value) ? value[0] : value
+  const nextLimit = contextLimitFromSliderIndex(numericValue)
+  if (nextLimit === editingContextLimit.value) return
+  editingContextLimit.value = nextLimit
+  scheduleContextLimitSave()
+}
+
+function handleContextPickerVisibility(show: boolean) {
+  showContextPicker.value = show
+  if (!show && contextSaveTimer) {
+    clearTimeout(contextSaveTimer)
+    contextSaveTimer = null
+    const pending = pendingContextSave
+    pendingContextSave = null
+    if (pending) void saveContextLimit(pending.limit, pending.target)
   }
 }
 
 function currentContextLengthParams() {
-  const activeSession = chatStore.activeSession
+  const target = currentContextSaveTarget()
+  if (target) {
+    return {
+      profile: target.profile,
+      provider: target.provider,
+      model: target.model,
+    }
+  }
   return {
-    profile: activeSession?.profile || profilesStore.activeProfileName || undefined,
-    provider: activeSession?.provider || undefined,
-    model: activeSession?.model || undefined,
+    profile: chatStore.activeSession?.profile || profilesStore.activeProfileName || 'default',
+    provider: undefined,
+    model: undefined,
   }
 }
 
@@ -1020,7 +1107,7 @@ async function loadContextLength() {
     try {
       const value = await fetchContextLength(params.profile, params.provider, params.model)
       if (currentContextLengthKey() !== key) return
-      contextLength.value = value
+      contextLength.value = normalizeContextLength(value)
       contextLengthLoadedKey = key
     } catch {
       if (currentContextLengthKey() !== key) return
@@ -1151,13 +1238,29 @@ function handleDrop(e: DragEvent) {
   addFiles(files)
 }
 
-defineExpose({ addFiles, addBrowserAttachment })
+function activateSteeringMode() {
+  steeringMode.value = true
+  nextTick(() => textareaRef.value?.focus())
+}
+
+defineExpose({ addFiles, addBrowserAttachment, activateSteeringMode })
 
 // --- Send ---
 
 function handleSend() {
   const text = inputText.value.trim()
   if (!text && attachments.value.length === 0) return
+  if (steeringMode.value && text && attachments.value.length === 0) {
+    // The server handles /steer before normal queueing, forwarding the text to
+    // the active bridge run at its next safe checkpoint.
+    chatStore.sendSteerMessage(text)
+    inputText.value = ''
+    steeringMode.value = false
+    saveDraftForActiveSession('')
+    slashActive.value = false
+    if (textareaRef.value) textareaRef.value.style.height = 'auto'
+    return
+  }
   if (isBridgeSession.value && text === '/skill' && attachments.value.length === 0) {
     void openSkillPicker()
     return
@@ -1173,6 +1276,7 @@ function handleSend() {
 
   chatStore.sendMessage(text, attachments.value.length > 0 ? attachments.value : undefined)
   inputText.value = ''
+  steeringMode.value = false
   saveDraftForActiveSession('')
   attachments.value = []
   slashActive.value = false
@@ -1446,7 +1550,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 function handleInput(e: Event) {
   const el = e.target as HTMLTextAreaElement
-  if (!isComposing.value) updateSlashState()
+  if (!isComposing.value) updateSlashState(el)
   // 用户手动拖拽自定义高度时，不覆盖
   if (textareaHeight.value !== null) return
   autoSizeTextarea(el)
@@ -1471,6 +1575,8 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('mousedown', onDocumentMousedown)
   window.removeEventListener('resize', syncViewport)
+  if (contextSaveTimer) clearTimeout(contextSaveTimer)
+  pendingContextSave = null
   if (activeVoiceCaptureMode.value === 'local') {
     localStreamGeneration += 1
     localPcmRecorder.cancel()
@@ -1569,14 +1675,54 @@ function isImage(type: string): boolean {
       <div v-if="showContextUsage" class="context-usage-row">
         <span class="context-info" :class="{ 'context-warning': usagePercent > 80 }">
           {{ formatTokens(totalTokens) }} /
-          <NTooltip trigger="hover" :disabled="isMobileViewport">
+          <NPopover
+            :show="showContextPicker"
+            trigger="click"
+            placement="top"
+            :show-arrow="true"
+            @update:show="handleContextPickerVisibility"
+          >
             <template #trigger>
-              <span class="context-limit-editable" @click="handleEditContextLimit">
-                {{ formatTokens(contextLength) }}
-              </span>
+              <NTooltip trigger="hover" :disabled="isMobileViewport">
+                <template #trigger>
+                  <button
+                    type="button"
+                    class="context-limit-editable"
+                    :aria-label="t('chat.contextClickToEdit')"
+                    @click="handleEditContextLimit"
+                  >
+                    {{ formatTokens(contextLength) }}
+                  </button>
+                </template>
+                <span>{{ t('chat.contextClickToEdit') }}</span>
+              </NTooltip>
             </template>
-            <span>{{ t('chat.contextClickToEdit') }}</span>
-          </NTooltip>
+            <div class="context-limit-picker">
+              <div class="context-limit-heading">
+                <span>{{ t('chat.contextEditTitle') }}</span>
+                <strong>{{ contextLimitLabel(editingContextLimit) }}</strong>
+              </div>
+              <NSlider
+                class="context-limit-slider"
+                :value="contextSliderIndex"
+                :min="0"
+                :max="CONTEXT_LIMIT_OPTIONS.length - 1"
+                :step="1"
+                :format-tooltip="contextSliderLabel"
+                :disabled="isSavingContextLimit"
+                @update:value="onContextSliderChange"
+              />
+              <div class="context-limit-marks" aria-hidden="true">
+                <span v-for="limit in CONTEXT_LIMIT_OPTIONS" :key="limit">
+                  {{ contextLimitLabel(limit) }}
+                </span>
+              </div>
+              <div class="context-limit-hint">
+                {{ t('chat.contextEditHint') }}
+                <span v-if="isSavingContextLimit"> · {{ t('common.loading') }}</span>
+              </div>
+            </div>
+          </NPopover>
           · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
         </span>
         <div class="context-bar">
@@ -1979,46 +2125,6 @@ function isImage(type: string): boolean {
       @created="handleBundleCreated"
     />
 
-    <!-- Context Length Edit Modal -->
-    <NModal
-      v-model:show="showContextEditModal"
-      :title="t('chat.contextEditTitle')"
-      :mask-closable="true"
-      preset="card"
-      style="width: 400px"
-    >
-      <div class="context-edit-content">
-        <p style="margin-bottom: 16px; color: #666;">
-          {{ t('chat.contextEditDesc') }}
-        </p>
-        <NInputNumber
-          v-model:value="editingContextLimit"
-          :min="1000"
-          :max="10000000"
-          :step="1000"
-          :show-button="false"
-          :placeholder="t('chat.contextEditPlaceholder')"
-          style="width: 100%"
-        >
-          <template #suffix>
-            <span style="color: #999;">tokens</span>
-          </template>
-        </NInputNumber>
-        <div style="margin-top: 12px; font-size: 12px; color: #999;">
-          {{ t('chat.contextEditHint') }}
-        </div>
-      </div>
-      <template #footer>
-        <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <NButton @click="showContextEditModal = false" :disabled="isSavingContextLimit">
-            {{ t('chat.contextEditCancel') }}
-          </NButton>
-          <NButton type="primary" @click="saveContextLimit" :loading="isSavingContextLimit">
-            {{ t('chat.contextEditSave') }}
-          </NButton>
-        </div>
-      </template>
-    </NModal>
   </div>
 </template>
 
@@ -2444,6 +2550,12 @@ function isImage(type: string): boolean {
 }
 
 .context-limit-editable {
+  display: inline-block;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
   cursor: pointer;
   border-bottom: 1px dashed transparent;
   transition: all 0.2s ease;
@@ -2454,6 +2566,71 @@ function isImage(type: string): boolean {
     background: rgba(128, 128, 128, 0.1);
     border-radius: 2px;
   }
+}
+
+.context-limit-picker {
+  width: clamp(280px, 52vw, 500px);
+  max-width: calc(100vw - 48px);
+  padding: 4px 4px 2px;
+}
+
+.context-limit-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  color: $text-secondary;
+  font-size: 12px;
+
+  strong {
+    color: $text-primary;
+    font-size: 13px;
+    font-weight: 700;
+  }
+}
+
+.context-limit-slider {
+  --n-handle-size: 20px !important;
+  --n-rail-height: 8px !important;
+  margin: 0 6px;
+
+  :deep(.n-slider-rail) {
+    background: rgba(var(--text-primary-rgb), 0.16);
+  }
+
+  :deep(.n-slider-rail__fill) {
+    background: linear-gradient(90deg, #4ea1ff 0%, #38c7e8 40%, #6bd66d 72%, #f0b84e 100%);
+  }
+
+  :deep(.n-slider-handle) {
+    border: 2px solid rgba(255, 255, 255, 0.96);
+    background: #f8fafc;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.32);
+  }
+}
+
+.context-limit-marks {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 2px;
+  margin: 6px 0 0;
+  color: $text-muted;
+  font-size: 10px;
+  line-height: 1.2;
+
+  span {
+    min-width: 0;
+    text-align: center;
+    white-space: nowrap;
+  }
+}
+
+.context-limit-hint {
+  margin-top: 12px;
+  color: $text-muted;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 .context-bar {

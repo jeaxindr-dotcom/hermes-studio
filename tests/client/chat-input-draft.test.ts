@@ -11,6 +11,7 @@ const fetchSkillsMock = vi.hoisted(() => vi.fn())
 const fetchSkillBundlesMock = vi.hoisted(() => vi.fn())
 const deleteSkillBundleApiMock = vi.hoisted(() => vi.fn())
 const dialogWarningMock = vi.hoisted(() => vi.fn())
+const setModelContextMock = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -54,7 +55,7 @@ vi.mock('@/api/hermes/sessions', () => ({
 }))
 
 vi.mock('@/api/hermes/model-context', () => ({
-  setModelContext: vi.fn().mockResolvedValue(undefined),
+  setModelContext: setModelContextMock,
 }))
 
 vi.mock('@/api/hermes/skills', () => ({
@@ -107,6 +108,8 @@ describe('ChatInput draft persistence', () => {
     deleteSkillBundleApiMock.mockReset()
     deleteSkillBundleApiMock.mockResolvedValue(undefined)
     dialogWarningMock.mockReset()
+    setModelContextMock.mockReset()
+    setModelContextMock.mockResolvedValue(undefined)
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:chat-attachment'),
@@ -257,6 +260,57 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.find('.context-bar').exists()).toBe(true)
   })
 
+  it('renders the context picker through 1M and persists the maximum option', async () => {
+    const { setModelContext } = await import('@/api/hermes/model-context')
+    const wrapper = mountForSession('session-context-picker', {
+      provider: 'openai-codex',
+      model: 'gpt-5.6-luna',
+    })
+    await nextTick()
+
+    const popover = wrapper.get('.n-popover-stub')
+    const slider = wrapper.get('.context-limit-slider')
+    expect(popover.attributes('placement')).toBe('top')
+    expect(slider.attributes('min')).toBe('0')
+    expect(slider.attributes('max')).toBe('8')
+    expect(wrapper.get('.context-limit-marks').text()).toContain('1M')
+
+    await slider.setValue('8')
+    await new Promise(resolve => setTimeout(resolve, 220))
+
+    expect(setModelContext).toHaveBeenCalledWith('openai-codex', 'gpt-5.6-luna', 1_000_000, 'default')
+  })
+
+  it('keeps a delayed context save scoped to the session where it was selected', async () => {
+    const { setModelContext } = await import('@/api/hermes/model-context')
+    const wrapper = mountForSession('session-context-a', {
+      profile: 'profile-a',
+      provider: 'provider-a',
+      model: 'model-a',
+    })
+    const store = useChatStore()
+    await nextTick()
+
+    await wrapper.get('.context-limit-slider').setValue('8')
+    store.sessions = [{
+      ...store.sessions[0],
+      id: 'session-context-b',
+      title: 'session-context-b',
+      profile: 'profile-b',
+      provider: 'provider-b',
+      model: 'model-b',
+    }]
+    store.activeSessionId = 'session-context-b'
+    store.activeSession = store.sessions[0]
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 220))
+    await flushPromises()
+
+    expect(setModelContext).toHaveBeenCalledTimes(1)
+    expect(setModelContext).toHaveBeenCalledWith('provider-a', 'model-a', 1_000_000, 'profile-a')
+    expect(wrapper.get('.context-limit-editable').text()).toContain('256.0k')
+  })
+
   it('shows reasoning effort selector for coding-agent sessions', async () => {
     const wrapper = mountForSession('session-codex', {
       source: 'coding_agent',
@@ -265,10 +319,10 @@ describe('ChatInput draft persistence', () => {
     })
     await nextTick()
 
-    expect(wrapper.find('.n-popover-stub').exists()).toBe(true)
-    expect(wrapper.find('.n-slider-stub').exists()).toBe(true)
-    expect(wrapper.get('.n-slider-stub').attributes('min')).toBe('0')
-    expect(wrapper.get('.n-slider-stub').attributes('max')).toBe('7')
+    expect(wrapper.find('.reasoning-effort-button').exists()).toBe(true)
+    expect(wrapper.find('.reasoning-effort-slider').exists()).toBe(true)
+    expect(wrapper.get('.reasoning-effort-slider').attributes('min')).toBe('0')
+    expect(wrapper.get('.reasoning-effort-slider').attributes('max')).toBe('7')
   })
 
   it('hides the reasoning effort selector for MoA sessions', async () => {
@@ -278,7 +332,7 @@ describe('ChatInput draft persistence', () => {
     })
     await nextTick()
 
-    expect(wrapper.find('.n-popover-stub').exists()).toBe(false)
+    expect(wrapper.find('.reasoning-effort-button').exists()).toBe(false)
   })
 
   it('renders the authorization mode control after the model selector', async () => {
@@ -365,26 +419,26 @@ describe('ChatInput draft persistence', () => {
     const wrapper = mountForSession('session-reasoning-max')
     const store = useChatStore()
 
-    await wrapper.get('.n-slider-stub').setValue('7')
+    await wrapper.get('.reasoning-effort-slider').setValue('7')
     await nextTick()
 
     expect(store.sessions[0].reasoningEffort).toBe('max')
     expect(localStorage.getItem('hermes:reasoning_effort:session-reasoning-max')).toBe('max')
     expect(wrapper.get('.reasoning-effort-button').attributes('style')).toContain('--reasoning-effort-accent-color: #ef4444')
-    expect(wrapper.get('.n-slider-stub').classes()).toContain('reasoning-effort-slider--max')
+    expect(wrapper.get('.reasoning-effort-slider').classes()).toContain('reasoning-effort-slider--max')
   })
 
   it('stores the selected reasoning effort for the active session', async () => {
     const wrapper = mountForSession('session-reasoning')
     const store = useChatStore()
 
-    await wrapper.get('.n-slider-stub').setValue('5')
+    await wrapper.get('.reasoning-effort-slider').setValue('5')
     await nextTick()
 
     expect(store.sessions[0].reasoningEffort).toBe('high')
     expect(localStorage.getItem('hermes:reasoning_effort:session-reasoning')).toBe('high')
     expect(wrapper.get('.reasoning-effort-button').attributes('style')).toContain('--reasoning-effort-accent-color: #f9c33c')
-    expect(wrapper.get('.n-slider-stub').classes()).not.toContain('reasoning-effort-slider--max')
+    expect(wrapper.get('.reasoning-effort-slider').classes()).not.toContain('reasoning-effort-slider--max')
   })
 
   it('opens the skill picker from /skill and inserts the selected skill command', async () => {
@@ -498,8 +552,10 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.findAll('.slash-command-item').length).toBeGreaterThan(0)
 
     await textarea.setValue('/ter')
+    ;(textarea.element as HTMLTextAreaElement).setSelectionRange(4, 4)
+    await textarea.trigger('input')
     await nextTick()
-
+    await new Promise(resolve => setTimeout(resolve, 220))
     expect(wrapper.find('.slash-command-dropdown').exists()).toBe(false)
   })
 })

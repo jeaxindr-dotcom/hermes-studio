@@ -700,6 +700,9 @@ export default {
       fast: 'Fast',
       thinking: 'Thinking',
     },
+    steer: 'Steer',
+    steerTooltip: 'Send this instruction to the active run at its next safe checkpoint',
+    steerUnavailable: 'Available while a run is active',
     authorizationMode: {
       tooltip: 'Command authorization',
       options: {
