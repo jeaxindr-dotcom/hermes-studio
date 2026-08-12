@@ -526,6 +526,15 @@ export async function handleBridgeRun(
       display_content: displayContentForStorage,
       timestamp: now,
     })
+    data.onEvent?.('message.created', {
+      event: 'message.created',
+      session_id,
+      queue_id: data.queue_id,
+      message_id: messageId,
+      role: displayRole,
+      content: inputStr,
+      timestamp: now,
+    })
   } else if (!getSession(session_id)) {
     const previewText = displayInput === null ? extractTextForPreview(input) : extractTextForPreview(displayInput || input)
     const preview = previewText.replace(/[\r\n]/g, ' ').substring(0, 100)
@@ -834,6 +843,7 @@ export async function resumeBridgeRun(
     provider?: string | null
     workspace?: string | null
     source?: string | null
+    onEvent?: (event: string, payload: any) => void
   },
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
@@ -864,6 +874,7 @@ export async function resumeBridgeRun(
   const emit = (event: string, payload: any) => {
     const tagged = { ...payload, session_id: sessionId }
     observePetEvent(profile, event, tagged)
+    args.onEvent?.(event, tagged)
     nsp.to(`session:${sessionId}`).emit(event, tagged)
     if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
       socket.emit(event, tagged)
@@ -1659,6 +1670,7 @@ async function applyBridgeChunkAsync(
   const payload = {
     event: eventName,
     run_id: chunk.run_id,
+    message_id: state.bridgeAssistantMessageId,
     output: finalResponse,
     result: chunk.result,
     error: terminalError || chunk.error,

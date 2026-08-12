@@ -129,6 +129,7 @@ export interface AuxiliaryModelsResponse {
 export interface MoaModelSlot {
   provider: string
   model: string
+  reasoning_effort?: string
 }
 
 export interface MoaPreset {
