@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   createCustomizationManifest,
@@ -13,6 +13,15 @@ function git(root: string, ...args: string[]): string {
 }
 
 describe('customization manifest writer', () => {
+  it('pins the custom release workflow metadata to the official version tag', () => {
+    const workflow = readFileSync(resolve('.github/workflows/custom-release.yml'), 'utf8')
+    expect(workflow).toContain('UPSTREAM_VERSION_TAG="v${DESKTOP_VERSION}"')
+    expect(workflow).toContain('git fetch --no-tags upstream "refs/tags/${UPSTREAM_VERSION_TAG}:refs/tags/${UPSTREAM_VERSION_TAG}"')
+    expect(workflow).toContain('UPSTREAM_COMMIT=$(git rev-parse "${UPSTREAM_VERSION_TAG}^{commit}")')
+    expect(workflow).toContain('HERMES_STUDIO_UPSTREAM_VERSION: ${{ env.DESKTOP_VERSION }}')
+    expect(workflow).not.toContain('UPSTREAM_COMMIT=$(git rev-parse upstream/main)')
+  })
+
   it('records the upstream/custom commits and bundle hashes without user data paths', () => {
     const root = mkdtempSync(join(tmpdir(), 'hermes-custom-manifest-'))
     try {

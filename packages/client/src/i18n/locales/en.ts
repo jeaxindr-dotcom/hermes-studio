@@ -96,6 +96,7 @@ export default {
     reset: 'Reset',
     saved: 'Saved',
     update: 'Update',
+    refresh: 'Refresh',
     create: 'Create',
     saveFailed: 'Save failed',
     deleteFailed: 'Delete failed',

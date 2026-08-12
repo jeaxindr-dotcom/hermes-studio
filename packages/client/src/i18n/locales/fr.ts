@@ -108,6 +108,7 @@ export default {
     save: 'Enregistrer',
     saved: 'Enregistre',
     update: 'Mettre a jour',
+    refresh: 'Actualiser',
     create: 'Creer',
     saveFailed: 'Echec de l\'enregistrement',
     deleteFailed: 'Echec de la suppression',

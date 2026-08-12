@@ -43,15 +43,23 @@ jobs:
             package-lock.json
             packages/desktop/package-lock.json
 
-      - name: Fetch upstream metadata
+      - name: Fetch upstream release metadata
         shell: bash
         run: |
           set -euo pipefail
           git remote add upstream "$UPSTREAM_REPOSITORY" 2>/dev/null || git remote set-url upstream "$UPSTREAM_REPOSITORY"
-          git fetch --no-tags upstream main
+          DESKTOP_VERSION="$(node -p "require('./packages/desktop/package.json').version")"
+          UPSTREAM_VERSION_TAG="v${DESKTOP_VERSION}"
+          git fetch --no-tags upstream "refs/tags/${UPSTREAM_VERSION_TAG}:refs/tags/${UPSTREAM_VERSION_TAG}"
+          UPSTREAM_COMMIT=$(git rev-parse "${UPSTREAM_VERSION_TAG}^{commit}")
+          git merge-base --is-ancestor "$UPSTREAM_COMMIT" HEAD || {
+            echo "Custom source does not contain official ${UPSTREAM_VERSION_TAG} (${UPSTREAM_COMMIT})" >&2
+            exit 1
+          }
+          echo "DESKTOP_VERSION=${DESKTOP_VERSION}" >> "$GITHUB_ENV"
           echo "CUSTOM_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "UPSTREAM_COMMIT=$(git rev-parse upstream/main)" >> "$GITHUB_ENV"
-          echo "UPSTREAM_BASE=$(git merge-base HEAD upstream/main)" >> "$GITHUB_ENV"
+          echo "UPSTREAM_COMMIT=${UPSTREAM_COMMIT}" >> "$GITHUB_ENV"
+          echo "UPSTREAM_BASE=${UPSTREAM_COMMIT}" >> "$GITHUB_ENV"
 
       - name: Install Web UI dependencies
         shell: bash
@@ -83,6 +91,7 @@ jobs:
           HERMES_STUDIO_CUSTOM_COMMIT: ${{ env.CUSTOM_COMMIT }}
           HERMES_STUDIO_UPSTREAM_COMMIT: ${{ env.UPSTREAM_COMMIT }}
           HERMES_STUDIO_UPSTREAM_BASE: ${{ env.UPSTREAM_BASE }}
+          HERMES_STUDIO_UPSTREAM_VERSION: ${{ env.DESKTOP_VERSION }}
           HERMES_STUDIO_CUSTOM_BRANCH: ${{ env.CUSTOM_BRANCH }}
         run: npm --prefix packages/desktop run dist:custom-win -- --publish never
 
