@@ -50,5 +50,7 @@ describe('response mode', () => {
       .toBe('low')
     expect(reasoningEffortForProvider('none', 'openai-codex', 'gpt-5.6-luna'))
       .toBe('none')
+    expect(reasoningEffortForProvider('none', 'local', 'deepseek-v4-flash-r2'))
+      .toBeUndefined()
   })
 })

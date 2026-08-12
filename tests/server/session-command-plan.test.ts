@@ -59,11 +59,13 @@ function makeContext(state: any, commandResult: Record<string, unknown> = {
     connected: true,
     join: vi.fn(),
     emit: vi.fn(),
+    to: vi.fn(() => ({ emit: vi.fn() })),
   }
   const sessionMap = new Map([['session-1', state]])
   const runQueuedItem = vi.fn()
   const bridge = {
     command: vi.fn(async () => commandResult),
+    steer: vi.fn(async () => undefined),
     mcpReload: vi.fn(async () => ({ ok: true, message: 'MCP servers reloaded' })),
     reloadSkills: vi.fn(async () => ({
       ok: true,
@@ -102,6 +104,104 @@ describe('plan session command', () => {
         },
       },
     })
+  })
+
+  it('persists a successful UI steer as the visible user instruction, not the transport command', async () => {
+    addMessageMock.mockReturnValueOnce(42)
+    const state = { messages: [], isWorking: true, events: [], queue: [] }
+    const { bridge, namespaceEmit, nsp, runQueuedItem, sessionMap, socket } = makeContext(state)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/services/hermes/run-chat/session-command')
+    const command = parseSessionCommand('/steer focus on the main point')!
+
+    await handleSessionCommand('session-1', command, {
+      nsp: nsp as any,
+      socket: socket as any,
+      sessionMap,
+      bridge: bridge as any,
+      profile: 'default',
+      displayInput: 'focus on the main point',
+      displayRole: 'user',
+      queueId: 'client-queue-id',
+      runQueuedItem,
+    })
+
+    expect(bridge.steer).toHaveBeenCalledWith('session-1', 'focus on the main point')
+    expect(addMessageMock).toHaveBeenCalledTimes(1)
+    expect(addMessageMock).toHaveBeenCalledWith(expect.objectContaining({
+      session_id: 'session-1',
+      role: 'user',
+      content: 'focus on the main point',
+    }))
+    expect(state.messages).toEqual([expect.objectContaining({
+      role: 'user',
+      content: 'focus on the main point',
+    })])
+    expect(namespaceEmit).toHaveBeenCalledWith('session.command', expect.objectContaining({
+      action: 'steer',
+      silent: true,
+    }))
+  })
+
+  it('atomically removes a queued message before steering it', async () => {
+    addMessageMock.mockReturnValueOnce(43)
+    const state = {
+      messages: [],
+      isWorking: true,
+      events: [],
+      queue: [{ queue_id: 'queued-user-1', input: 'focus on safety', profile: 'default' }],
+    }
+    const { bridge, namespaceEmit, nsp, runQueuedItem, sessionMap, socket } = makeContext(state)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/services/hermes/run-chat/session-command')
+    const command = parseSessionCommand('/steer focus on safety')!
+
+    await handleSessionCommand('session-1', command, {
+      nsp: nsp as any,
+      socket: socket as any,
+      sessionMap,
+      bridge: bridge as any,
+      profile: 'default',
+      displayInput: 'focus on safety',
+      displayRole: 'user',
+      queueId: 'steer-request-1',
+      targetQueueId: 'queued-user-1',
+      runQueuedItem,
+    })
+
+    expect(state.queue).toEqual([])
+    expect(bridge.steer).toHaveBeenCalledWith('session-1', 'focus on safety')
+    expect(namespaceEmit).toHaveBeenCalledWith('session.command', expect.objectContaining({
+      action: 'steer',
+      targetQueueId: 'queued-user-1',
+      silent: true,
+    }))
+  })
+
+  it('refuses queue-to-steer conversion when the target is no longer queued', async () => {
+    const state = { messages: [], isWorking: true, events: [], queue: [] }
+    const { bridge, namespaceEmit, nsp, runQueuedItem, sessionMap, socket } = makeContext(state)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/services/hermes/run-chat/session-command')
+    const command = parseSessionCommand('/steer do not duplicate this')!
+
+    await handleSessionCommand('session-1', command, {
+      nsp: nsp as any,
+      socket: socket as any,
+      sessionMap,
+      bridge: bridge as any,
+      profile: 'default',
+      displayInput: 'do not duplicate this',
+      displayRole: 'user',
+      queueId: 'steer-request-2',
+      targetQueueId: 'already-dequeued',
+      runQueuedItem,
+    })
+
+    expect(bridge.steer).not.toHaveBeenCalled()
+    expect(addMessageMock).not.toHaveBeenCalled()
+    expect(namespaceEmit).toHaveBeenCalledWith('session.command', expect.objectContaining({
+      ok: false,
+      action: 'steer',
+      targetQueueId: 'already-dequeued',
+    }))
   })
 
   it('queues running plan commands once without visible command echo', async () => {

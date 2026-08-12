@@ -96,6 +96,8 @@ interface SendMessageOptions {
   displayContent?: string
   /** Optional display role for command-backed messages. */
   displayRole?: 'user' | 'command'
+  /** Existing queued item that the server must atomically consume before steering. */
+  targetQueueId?: string
 }
 
 export type SubagentStreamStatus =
@@ -1251,6 +1253,7 @@ export const useChatStore = defineStore('chat', () => {
   const queueLengths = ref<Map<string, number>>(new Map())
   /** sessionId → queued user messages not yet visible in the transcript */
   const queuedUserMessages = ref<Map<string, Message[]>>(new Map())
+  const pendingSteerQueueMessages = new Map<string, { queued: Message; optimisticId?: string }>()
   /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
   const dequeuedQueueIds = ref<Map<string, Set<string>>>(new Map())
   /** sessionId → message selected as the reference for the next user turn */
@@ -2590,6 +2593,21 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessions.value.find(s => s.id === sid)
     const action = (evt as any).action as string | undefined
     const command = String((evt as any).command || '').toLowerCase()
+    if (action === 'steer' && typeof (evt as any).targetQueueId === 'string') {
+      const targetQueueId = String((evt as any).targetQueueId)
+      const pendingKey = `${sid}:${targetQueueId}`
+      const pending = pendingSteerQueueMessages.get(pendingKey)
+      if ((evt as any).ok === false && pending) {
+        if (pending.optimisticId) {
+          const targetMessages = getSessionMsgs(sid)
+          const optimisticIndex = targetMessages.findIndex(message => message.id === pending.optimisticId)
+          if (optimisticIndex >= 0) targetMessages.splice(optimisticIndex, 1)
+        }
+        enqueueUserMessage(sid, pending.queued)
+      }
+      pendingSteerQueueMessages.delete(pendingKey)
+      if ((evt as any).silent === true) return
+    }
     if ((evt as any).started === true && (evt as any).terminal === false) {
       serverWorking.value.add(sid)
     }
@@ -3224,6 +3242,7 @@ export const useChatStore = defineStore('chat', () => {
       } else {
         // No attachments: use plain text format
         input = submittedContent
+        if (options?.displayContent !== undefined) displayInput = options.displayContent
       }
 
       const appStore = useAppStore()
@@ -3275,6 +3294,7 @@ export const useChatStore = defineStore('chat', () => {
       const runPayload: StartRunRequest = {
         input,
         ...(displayInput ? { display_input: displayInput } : {}),
+        ...(options?.displayRole ? { display_role: options.displayRole } : {}),
         session_id: sid,
         profile: sessionProfile,
         model: isCodingAgentExecution
@@ -3288,6 +3308,7 @@ export const useChatStore = defineStore('chat', () => {
           models: group.models,
         })),
         queue_id: userMsg.id,
+        ...(options?.targetQueueId ? { target_queue_id: options.targetQueueId } : {}),
         workspace: activeSession.value?.workspace || undefined,
         category_id: activeSession.value?.categoryId ?? null,
         source: sessionSource,
@@ -4878,7 +4899,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendSteerMessage(content: string) {
     const text = content.trim()
-    if (!text) return
+    if (!text || isCodingAgentLikeSession(activeSession.value)) return
     return sendMessage(text, undefined, {
       transportInput: `/steer ${text}`,
       displayContent: text,
@@ -4889,9 +4910,24 @@ export const useChatStore = defineStore('chat', () => {
   async function steerQueuedMessage(sessionId: string, messageId: string, content: string) {
     const text = content.trim()
     if (!sessionId || !messageId || !text) return
-    if (activeSessionId.value !== sessionId) return
-    removeQueuedMessage(sessionId, messageId)
-    return sendSteerMessage(text)
+    if (activeSessionId.value !== sessionId || isCodingAgentLikeSession(activeSession.value)) return
+    const queued = (queuedUserMessages.value.get(sessionId) || []).find(message => message.id === messageId)
+    if (!queued) return
+    if (!dropQueuedUserMessage(sessionId, messageId)) return
+    const pendingKey = `${sessionId}:${messageId}`
+    pendingSteerQueueMessages.set(pendingKey, { queued })
+    const result = await sendMessage(text, undefined, {
+      transportInput: `/steer ${text}`,
+      displayContent: text,
+      displayRole: 'user',
+      targetQueueId: messageId,
+    })
+    const optimistic = [...getSessionMsgs(sessionId)].reverse().find(message =>
+      message.role === 'user' && message.content === text,
+    )
+    const pending = pendingSteerQueueMessages.get(pendingKey)
+    if (pending && optimistic) pending.optimisticId = optimistic.id
+    return result
   }
 
   function stopStreaming() {

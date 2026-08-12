@@ -17,6 +17,8 @@ export interface StartRunRequest {
   input: string | ContentBlock[]
   /** Optional UI/storage representation when model input carries hidden metadata. */
   display_input?: string | ContentBlock[] | null
+  /** Optional visible role when the transport input is an internal command. */
+  display_role?: 'user' | 'command'
   instructions?: string
   session_id?: string
   profile?: string
@@ -24,6 +26,8 @@ export interface StartRunRequest {
   provider?: string
   model_groups?: Array<{ provider: string; models: string[] }>
   queue_id?: string
+  /** Existing queued item that must be consumed atomically before steering. */
+  target_queue_id?: string
   source?: 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
   session_source?: 'global_agent' | 'workflow' | 'group_chat'
   coding_agent_id?: ChatCodingAgentId

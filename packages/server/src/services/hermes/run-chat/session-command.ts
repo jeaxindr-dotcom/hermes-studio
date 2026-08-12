@@ -48,7 +48,10 @@ interface SessionCommandContext {
   provider?: string
   model_groups?: Array<{ provider: string; models: string[] }>
   instructions?: string
+  displayInput?: string | ContentBlock[] | null
+  displayRole?: 'user' | 'command'
   queueId?: string
+  targetQueueId?: string
   runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void
 }
 
@@ -126,13 +129,13 @@ export async function handleSessionCommand(
   ctx.socket.join(`session:${sessionId}`)
   ensureCommandSession(sessionId, command, ctx)
   const isKnownCommand = Boolean(COMMAND_ALIASES[command.rawName])
-  if (command.name !== 'plan' && command.name !== 'skill' && command.name !== 'bundles' && command.name !== 'learn' && command.name !== 'branch' && command.name !== 'moa' && isKnownCommand) {
+  if (command.name !== 'plan' && command.name !== 'skill' && command.name !== 'bundles' && command.name !== 'learn' && command.name !== 'branch' && command.name !== 'moa' && command.name !== 'steer' && isKnownCommand) {
     persistCommandMessage(sessionId, state, `/${command.rawName}${command.args ? ` ${command.args}` : ''}`)
   }
 
   const emitCommand = (payload: Record<string, unknown>) => {
     const message = typeof payload.message === 'string' ? payload.message : ''
-    if (message) persistCommandMessage(sessionId, state, message)
+    if (message && payload.silent !== true) persistCommandMessage(sessionId, state, message)
     emitToSession(ctx.nsp, ctx.socket, sessionId, 'session.command', {
       event: 'session.command',
       session_id: sessionId,
@@ -836,8 +839,52 @@ export async function handleSessionCommand(
         emitCommand({ ok: false, action: 'steer', message: 'No active bridge run to steer.' })
         return
       }
+      if (ctx.targetQueueId) {
+        const targetIndex = state.queue.findIndex(item => item.queue_id === ctx.targetQueueId)
+        if (targetIndex < 0) {
+          emitCommand({
+            ok: false,
+            action: 'steer',
+            terminal: false,
+            silent: true,
+            targetQueueId: ctx.targetQueueId,
+            message: 'Queued message is no longer available to steer.',
+          })
+          return
+        }
+        state.queue.splice(targetIndex, 1)
+        emitQueuedState(ctx, sessionId, state)
+      }
       await ctx.bridge.steer(sessionId, command.args)
-      emitCommand({ action: 'steer', terminal: false, silent: true, message: 'Steer instruction sent.' })
+      if (ctx.displayInput !== null) {
+        const displayContent = ctx.displayInput === undefined
+          ? `/${command.rawName} ${command.args}`
+          : contentBlocksToString(ctx.displayInput)
+        persistSessionMessage(
+          sessionId,
+          state,
+          ctx.displayRole === 'user' ? 'user' : 'command',
+          displayContent,
+        )
+        if (typeof ctx.socket.to === 'function') {
+          ctx.socket.to(`session:${sessionId}`).emit('run.peer_user_message', {
+            event: 'run.peer_user_message',
+            session_id: sessionId,
+            message: {
+              role: ctx.displayRole === 'user' ? 'user' : 'command',
+              content: displayContent,
+              timestamp: Math.floor(Date.now() / 1000),
+            },
+          })
+        }
+      }
+      emitCommand({
+        action: 'steer',
+        terminal: false,
+        silent: true,
+        targetQueueId: ctx.targetQueueId,
+        message: 'Steer instruction sent.',
+      })
       return
     }
 
@@ -1141,17 +1188,26 @@ function buildCommandSessionTitle(command: ParsedSessionCommand): string {
 }
 
 function persistCommandMessage(sessionId: string, state: SessionState, content: string) {
+  persistSessionMessage(sessionId, state, 'command', content)
+}
+
+function persistSessionMessage(
+  sessionId: string,
+  state: SessionState,
+  role: 'user' | 'command',
+  content: string,
+) {
   const now = Math.floor(Date.now() / 1000)
   const id = addMessage({
     session_id: sessionId,
-    role: 'command',
+    role,
     content,
     timestamp: now,
   })
   state.messages.push({
-    id: id || `command_${now}_${state.messages.length}`,
+    id: id || `message_${now}_${state.messages.length}`,
     session_id: sessionId,
-    role: 'command',
+    role,
     content,
     timestamp: now,
   })

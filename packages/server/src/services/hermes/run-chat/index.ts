@@ -300,6 +300,7 @@ export class ChatRunSocket {
       provider?: string
       model_groups?: Array<{ provider: string; models: string[] }>
       queue_id?: string
+      target_queue_id?: string
       workspace?: string | null
       category_id?: number | null
       source?: string
@@ -352,7 +353,10 @@ export class ChatRunSocket {
               provider: data.provider,
               model_groups: data.model_groups,
               instructions: data.instructions,
+              displayInput: data.display_input,
+              displayRole: data.display_role,
               queueId: data.queue_id,
+              targetQueueId: data.target_queue_id,
               runQueuedItem: this.runQueuedItem.bind(this),
             })
             if (handled !== false) return

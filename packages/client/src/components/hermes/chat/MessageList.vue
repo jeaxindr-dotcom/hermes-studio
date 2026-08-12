@@ -33,6 +33,13 @@ const emit = defineEmits<{
 }>()
 
 const chatStore = useChatStore();
+const canSteerQueuedMessages = computed(() => {
+  const session = chatStore.activeSession
+  return !!session
+    && session.source !== 'coding_agent'
+    && !session.codingAgentId
+    && !['claude', 'codex', 'ekko-agent'].includes(session.agent || '')
+})
 const { t } = useI18n();
 const { toolTraceVisible } = useToolTraceVisibility();
 const listRef = ref<InstanceType<typeof VirtualMessageList> | null>(null);
@@ -966,6 +973,7 @@ defineExpose({
             </span>
             <span>{{ t('chat.messageQueue') }}</span>
             <NButton
+              v-if="canSteerQueuedMessages"
               quaternary
               size="small"
               class="queue-steer-button"

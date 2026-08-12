@@ -216,6 +216,8 @@ describe('chat store session.command fanout', () => {
     expect(chatApi.startRunViaSocket).toHaveBeenCalledWith(
       expect.objectContaining({
         input: '/steer réoriente la réponse vers le point principal',
+        display_input: 'réoriente la réponse vers le point principal',
+        display_role: 'user',
         session_id: 'session-1',
       }),
       expect.any(Function),
@@ -279,13 +281,72 @@ describe('chat store session.command fanout', () => {
       }),
     ])
     expect(chatApi.startRunViaSocket).toHaveBeenCalledWith(
-      expect.objectContaining({ input: '/steer dfasfdsa', session_id: 'session-1' }),
+      expect.objectContaining({
+        input: '/steer dfasfdsa',
+        display_input: 'dfasfdsa',
+        display_role: 'user',
+        target_queue_id: 'queue-1',
+        session_id: 'session-1',
+      }),
       expect.any(Function),
       expect.any(Function),
       expect.any(Function),
       undefined,
       expect.any(Object),
     )
+  })
+
+  it('restores the queued message when atomic queue-to-steer conversion is refused', async () => {
+    const store = useChatStore()
+    const session = makeSession()
+    session.source = 'cli'
+    store.sessions = [session]
+    store.activeSessionId = 'session-1'
+    store.activeSession = session
+    chatApi.sessionCommandHandlers[0]({
+      event: 'session.command', session_id: 'session-1', command: 'status',
+      action: 'status', started: true, terminal: false,
+    })
+    const queued = { id: 'queue-race', role: 'user' as const, content: 'keep me once', timestamp: 1, queued: true }
+    store.queuedUserMessages = new Map([['session-1', [queued]]])
+
+    await store.steerQueuedMessage('session-1', queued.id, queued.content)
+    expect(store.queuedUserMessages.get('session-1')).toBeUndefined()
+
+    chatApi.sessionCommandHandlers[0]({
+      event: 'session.command', session_id: 'session-1', command: 'steer',
+      action: 'steer', ok: false, silent: true, terminal: false,
+      targetQueueId: queued.id, message: 'Queued message is no longer available to steer.',
+    })
+
+    expect(store.queuedUserMessages.get('session-1')).toEqual([queued])
+    expect(store.messages).toEqual([])
+  })
+
+  it('does not consume a coding-agent queue item as a Bridge steer command', async () => {
+    const store = useChatStore()
+    const session = makeSession()
+    session.source = 'coding_agent'
+    session.agent = 'ekko-agent'
+    store.sessions = [session]
+    store.activeSessionId = 'session-1'
+    store.activeSession = session
+
+    chatApi.sessionCommandHandlers[0]({
+      event: 'session.command',
+      session_id: 'session-1',
+      command: 'status',
+      action: 'status',
+      started: true,
+      terminal: false,
+    })
+    const queued = { id: 'queue-1', role: 'user' as const, content: 'keep queued', timestamp: 1, queued: true }
+    store.queuedUserMessages = new Map([['session-1', [queued]]])
+
+    await store.steerQueuedMessage('session-1', 'queue-1', queued.content)
+
+    expect(store.queuedUserMessages.get('session-1')).toEqual([queued])
+    expect(chatApi.startRunViaSocket).not.toHaveBeenCalled()
   })
 
   it('does not show a thinking/streaming state while submitting terminal fork commands', async () => {

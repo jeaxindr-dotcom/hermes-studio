@@ -1,5 +1,12 @@
 export type ResponseMode = 'fast' | 'thinking'
 
+function isTq3Runtime(provider?: string | null, model?: string | null): boolean {
+  const target = `${provider || ''} ${model || ''}`.toLowerCase()
+  return target.includes('tq3')
+    || target.includes('deepseek-v4-flash-r2')
+    || target.includes('r2-deepseek-v4-flash')
+}
+
 /** Map the existing per-session reasoning effort to the simple composer mode. */
 export function responseModeFromReasoningEffort(effort?: string | null): ResponseMode {
   return effort === 'none' ? 'fast' : 'thinking'
@@ -28,11 +35,7 @@ export function chatTemplateKwargsForProvider(
   model?: string | null,
 ): Record<string, unknown> | undefined {
   const normalizedEffort = effort?.trim() || ''
-  const target = `${provider || ''} ${model || ''}`.toLowerCase()
-  const isTq3Runtime = target.includes('tq3')
-    || target.includes('deepseek-v4-flash-r2')
-
-  if (isTq3Runtime && normalizedEffort === 'none') {
+  if (isTq3Runtime(provider, model) && normalizedEffort === 'none') {
     return { enable_thinking: false }
   }
   return undefined
@@ -46,9 +49,6 @@ export function reasoningEffortForProvider(
   model?: string | null,
 ): string | undefined {
   const normalizedEffort = effort?.trim() || ''
-  const target = `${provider || ''} ${model || ''}`.toLowerCase()
-  const isTq3Runtime = target.includes('tq3')
-    || target.includes('r2-deepseek-v4-flash')
-  if (isTq3Runtime && normalizedEffort === 'none') return undefined
+  if (isTq3Runtime(provider, model) && normalizedEffort === 'none') return undefined
   return normalizedEffort || undefined
 }
