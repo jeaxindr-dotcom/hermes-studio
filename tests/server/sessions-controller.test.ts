@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
+
+const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir'
+
+async function createDirectoryLink(target: string, path: string) {
+  await symlink(target, path, directoryLinkType)
+}
+
+function profileWorkspace(profile = 'default') {
+  return join('/tmp/hermes-test', profile, 'workspace')
+}
 
 const listConversationSummariesFromDbMock = vi.fn()
 const getConversationDetailFromDbMock = vi.fn()
@@ -324,12 +334,12 @@ describe('session conversations controller', () => {
   it('serves bounded workspace preview bytes and blocks traversal, escaped links, and unauthorized profiles', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'hermes-workspace-preview-'))
     const outside = await mkdtemp(join(tmpdir(), 'hermes-workspace-preview-outside-'))
-    const hermesArtifactWorkspace = '/tmp/hermes-test/research/workspace'
+    const hermesArtifactWorkspace = resolve(profileWorkspace('research'))
     try {
       const pdfBytes = Buffer.from('%PDF-1.7\npreview')
       await writeFile(join(workspace, 'report.pdf'), pdfBytes)
       await writeFile(join(outside, 'secret.pdf'), Buffer.from('%PDF secret'))
-      await symlink(join(outside, 'secret.pdf'), join(workspace, 'escaped.pdf'))
+      await createDirectoryLink(outside, join(workspace, 'escaped'))
       await writeFile(join(workspace, 'large.pdf'), Buffer.alloc(0))
       await truncate(join(workspace, 'large.pdf'), 50 * 1024 * 1024 + 1)
       await mkdir(hermesArtifactWorkspace, { recursive: true })
@@ -393,7 +403,7 @@ describe('session conversations controller', () => {
 
       const escapedCtx: any = {
         params: { id: 'session-preview' },
-        query: { path: 'escaped.pdf' },
+        query: { path: 'escaped/secret.pdf' },
         state: { user: { id: 1, role: 'super_admin' } },
         body: null,
       }
@@ -450,7 +460,7 @@ describe('session conversations controller', () => {
 
       expect(listCtx.status).toBeUndefined()
       expect(listCtx.body.path).toBe('project')
-      expect(listCtx.body.absolutePath).toBe(join(workspace, 'project'))
+      expect(listCtx.body.absolutePath).toBe(resolve(workspace, 'project'))
       expect(listCtx.body.entries).toEqual([
         expect.objectContaining({ name: 'notes.md', path: 'project/notes.md', isDir: false }),
       ])
@@ -594,7 +604,7 @@ describe('session conversations controller', () => {
       const outsideLink = join(workspaceBase, 'DrivesD')
 
       await mkdir(outsideChild, { recursive: true })
-      await symlink(outsideTarget, outsideLink)
+      await createDirectoryLink(outsideTarget, outsideLink)
       Object.defineProperty(process, 'platform', { value: 'win32' })
       process.env.WORKSPACE_BASE = workspaceBase
 
@@ -637,8 +647,8 @@ describe('session conversations controller', () => {
 
       await mkdir(safeChild, { recursive: true })
       await mkdir(outsideTarget, { recursive: true })
-      await symlink(safeTarget, safeLink)
-      await symlink(outsideTarget, outsideLink)
+      await createDirectoryLink(safeTarget, safeLink)
+      await createDirectoryLink(outsideTarget, outsideLink)
       process.env.WORKSPACE_BASE = workspaceBase
 
       const mod = await import('../../packages/server/src/controllers/hermes/sessions')
@@ -738,7 +748,7 @@ describe('session conversations controller', () => {
       const escapeLink = join(workspaceBase, 'escape-link')
 
       await mkdir(outsideTarget, { recursive: true })
-      await symlink(outsideTarget, escapeLink)
+      await createDirectoryLink(outsideTarget, escapeLink)
       process.env.WORKSPACE_BASE = workspaceBase
 
       const mod = await import('../../packages/server/src/controllers/hermes/sessions')
@@ -1763,7 +1773,7 @@ describe('session conversations controller', () => {
     expect(localUpdateSessionMock).toHaveBeenCalledWith('session-1', {
       model: 'grok-4',
       provider: 'xai',
-      workspace: '/tmp/hermes-test/default/workspace',
+      workspace: profileWorkspace(),
     })
     expect(bridgeSwitchSessionModelMock).not.toHaveBeenCalled()
     expect(ctx.body).toEqual({ ok: true })
@@ -1792,7 +1802,7 @@ describe('session conversations controller', () => {
     expect(localUpdateSessionMock).toHaveBeenCalledWith('session-1', {
       model: 'claude-sonnet-4-6',
       provider: 'claude-oauth',
-      workspace: '/tmp/hermes-test/travel/workspace',
+      workspace: profileWorkspace('travel'),
     })
     expect(bridgeSwitchSessionModelMock).toHaveBeenCalledWith(
       'session-1',

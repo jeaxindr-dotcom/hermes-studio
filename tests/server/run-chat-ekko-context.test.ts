@@ -1307,7 +1307,12 @@ describe('ekko-agent context usage events', () => {
       }),
     ])
     const storedUserMessage = addMessageMock.mock.calls.find(call => call[0]?.role === 'user')?.[0]
-    expect(storedUserMessage?.content).toContain(imagePath)
+    const storedContent = JSON.parse(storedUserMessage?.content || '[]')
+    expect(storedContent).toContainEqual(expect.objectContaining({
+      type: 'image',
+      path: imagePath,
+      media_type: 'image/png',
+    }))
     expect(storedUserMessage?.content).not.toContain(expectedBase64)
   })
 

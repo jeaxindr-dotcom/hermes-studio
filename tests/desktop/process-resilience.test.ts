@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { CUSTOM_UPDATE_FEED_URL } from '../../packages/desktop/src/main/custom-update-manifest'
 import {
   mergeNodeHeapOptions,
+  scheduleRendererRecovery,
   shouldReloadRendererAfterGone,
   shouldRestartWebUiAfterExit,
 } from '../../packages/desktop/src/main/process-resilience'
@@ -15,6 +16,18 @@ describe('desktop process resilience', () => {
     expect(shouldReloadRendererAfterGone({ reason: 'killed' })).toBe(true)
     expect(shouldReloadRendererAfterGone({ reason: 'abnormal-exit' })).toBe(true)
     expect(shouldReloadRendererAfterGone({ reason: 'clean-exit' })).toBe(false)
+  })
+
+  it('defers renderer recovery until after the render-process-gone event unwinds', async () => {
+    const events: string[] = []
+    scheduleRendererRecovery(() => events.push('recover'), callback => {
+      events.push('scheduled')
+      queueMicrotask(callback)
+    })
+
+    expect(events).toEqual(['scheduled'])
+    await Promise.resolve()
+    expect(events).toEqual(['scheduled', 'recover'])
   })
 
   it('restarts an unexpectedly dead Web UI server with backoff, and stops when quitting', () => {

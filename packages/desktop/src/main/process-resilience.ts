@@ -11,6 +11,13 @@ export function shouldReloadRendererAfterGone(details: { reason?: string | null 
   return details.reason !== 'clean-exit'
 }
 
+export function scheduleRendererRecovery(
+  recover: () => void,
+  schedule: (callback: () => void) => unknown = setImmediate,
+): void {
+  schedule(recover)
+}
+
 export function shouldRestartWebUiAfterExit(input: {
   isQuitting: boolean
   exitCode: number | null

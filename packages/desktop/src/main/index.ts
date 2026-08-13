@@ -38,7 +38,7 @@ import {
 import { BrowserManager } from './browser/browser-manager'
 import { BrowserBroker } from './browser/browser-broker'
 import type { BrowserBounds } from './browser/browser-types'
-import { shouldReloadRendererAfterGone } from './process-resilience'
+import { scheduleRendererRecovery, shouldReloadRendererAfterGone } from './process-resilience'
 
 const PORT = Number(process.env.HERMES_DESKTOP_PORT) || 8748
 const START_HIDDEN = process.argv.includes('--hidden')
@@ -519,11 +519,16 @@ async function createWindow(): Promise<void> {
     console.error(`[desktop] main renderer gone reason=${details.reason} exitCode=${details.exitCode}`)
     if (!shouldReloadRendererAfterGone(details)) return
     const target = mainRouteUrl() || serverUrl
-    if (!target || !mainWindow || mainWindow.isDestroyed()) return
-    void mainWindow.loadURL(target).catch(error => {
-      console.warn('[desktop] failed to reload after renderer crash', error)
+    if (!target) return
+    scheduleRendererRecovery(() => {
+      const window = mainWindow
+      if (!window || window.isDestroyed()) return
+      void window.loadURL(target)
+        .then(() => showWindowWithFade(true))
+        .catch(error => {
+          console.warn('[desktop] failed to reload after renderer crash', error)
+        })
     })
-    showWindowWithFade(true)
   })
 
   // External links → system browser
