@@ -1503,11 +1503,6 @@ async function handleProjectDrop(event: DragEvent, key: string) {
   }
 }
 
-function projectIdFromKey(key: string): number | null {
-  const target = projectDropTargetFromKey(key);
-  return target?.kind === "project" ? target.categoryId : null;
-}
-
 function handleProjectDragOverKey(key: string) {
   handleProjectDragOver(key);
 }
