@@ -17,6 +17,9 @@ const messages: Message[] = [{
       { id: 'done', content: 'Robot icon', status: 'completed' },
       { id: 'current', content: 'Tasks panel', status: 'in_progress' },
       { id: 'next', content: 'Code workspace', status: 'pending' },
+      { id: 'four', content: 'Crash recovery', status: 'pending' },
+      { id: 'five', content: 'Body limit', status: 'pending' },
+      { id: 'six', content: 'Updater feed', status: 'pending' },
     ],
   },
 }]
@@ -99,8 +102,8 @@ describe('SessionActivityPanel', () => {
       global: { stubs: { NTooltip: TooltipStub } },
     })
 
-    expect(wrapper.get('.activity-progress-count').text()).toBe('1/3')
-    expect(wrapper.findAll('.activity-task-row')).toHaveLength(3)
+    expect(wrapper.get('.activity-progress-count').text()).toBe('1/6')
+    expect(wrapper.findAll('.activity-task-row')).toHaveLength(6)
     expect(wrapper.get('.activity-task-row--in_progress').text()).toContain('Tasks panel')
 
     await wrapper.get('[aria-label="Sous-agents"]').trigger('click')
