@@ -18,16 +18,18 @@ describe('desktop process resilience', () => {
     expect(shouldReloadRendererAfterGone({ reason: 'clean-exit' })).toBe(false)
   })
 
-  it('defers renderer recovery until after the render-process-gone event unwinds', async () => {
-    const events: string[] = []
-    scheduleRendererRecovery(() => events.push('recover'), callback => {
-      events.push('scheduled')
-      queueMicrotask(callback)
+  it('defers renderer recovery to a new macrotask after render-process-gone unwinds', async () => {
+    let recovered = false
+
+    scheduleRendererRecovery(() => {
+      recovered = true
     })
 
-    expect(events).toEqual(['scheduled'])
+    expect(recovered).toBe(false)
     await Promise.resolve()
-    expect(events).toEqual(['scheduled', 'recover'])
+    expect(recovered).toBe(false)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(recovered).toBe(true)
   })
 
   it('restarts an unexpectedly dead Web UI server with backoff, and stops when quitting', () => {
@@ -80,6 +82,13 @@ describe('desktop process resilience', () => {
     expect(main).toContain('shouldReloadRendererAfterGone')
     expect(server).toContain('shouldRestartWebUiAfterExit')
     expect(server).toContain('mergeNodeHeapOptions')
+  })
+
+  it('pins Electron to a release that defers render-process-gone outside renderer teardown', () => {
+    const desktopPackage = JSON.parse(readFileSync(resolve('packages/desktop/package.json'), 'utf8'))
+    const desktopLock = JSON.parse(readFileSync(resolve('packages/desktop/package-lock.json'), 'utf8'))
+    expect(desktopPackage.devDependencies.electron).toBe('42.4.1')
+    expect(desktopLock.packages['node_modules/electron'].version).toBe('42.4.1')
   })
 
   it('does not package the official updater URL in electron-builder.yml', () => {

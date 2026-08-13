@@ -518,13 +518,17 @@ async function createWindow(): Promise<void> {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error(`[desktop] main renderer gone reason=${details.reason} exitCode=${details.exitCode}`)
     if (!shouldReloadRendererAfterGone(details)) return
+    const crashedWindow = mainWindow
     const target = mainRouteUrl() || serverUrl
-    if (!target) return
+    if (isQuitting || !target || !crashedWindow || crashedWindow.isDestroyed()) return
     scheduleRendererRecovery(() => {
-      const window = mainWindow
-      if (!window || window.isDestroyed()) return
-      void window.loadURL(target)
-        .then(() => showWindowWithFade(true))
+      if (isQuitting || mainWindow !== crashedWindow || crashedWindow.isDestroyed()) return
+      void crashedWindow.loadURL(target)
+        .then(() => {
+          if (!isQuitting && mainWindow === crashedWindow && !crashedWindow.isDestroyed()) {
+            showWindowWithFade(true)
+          }
+        })
         .catch(error => {
           console.warn('[desktop] failed to reload after renderer crash', error)
         })
