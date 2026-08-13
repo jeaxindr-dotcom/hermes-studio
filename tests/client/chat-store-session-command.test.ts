@@ -228,6 +228,21 @@ describe('chat store session.command fanout', () => {
     )
   })
 
+  it('does not send a steer command on Codex or Claude Code sessions', async () => {
+    const store = useChatStore()
+    const session = makeSession()
+    session.source = 'coding_agent'
+    session.agent = 'codex'
+    store.sessions = [session]
+    store.activeSessionId = 'session-1'
+    store.activeSession = session
+
+    await store.sendSteerMessage('ignore this')
+
+    expect(chatApi.startRunViaSocket).not.toHaveBeenCalled()
+    expect(store.messages).toEqual([])
+  })
+
   it('does not add a command bubble for a silent steer acknowledgement', () => {
     const store = useChatStore()
     const session = makeSession()

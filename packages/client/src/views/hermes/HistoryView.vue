@@ -1020,7 +1020,12 @@ function handleBatchDeleteConfirm() {
           </NButton>
           <span class="header-session-title">{{ activeSessionTitle }}</span>
           <span v-if="activeSessionSource" class="source-badge">{{ getSourceLabel(activeSessionSource) }}</span>
-          <span v-if="historySession?.workspace" class="workspace-badge" :title="historySession.workspace">📁 {{ historySession.workspace.split('/').pop() || historySession.workspace }}</span>
+          <span v-if="historySession?.workspace" class="workspace-badge" :title="historySession.workspace">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h5l2 2H18.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" />
+            </svg>
+            {{ historySession.workspace.split('/').pop() || historySession.workspace }}
+          </span>
         </div>
         <div class="header-actions">
           <NTooltip trigger="hover">

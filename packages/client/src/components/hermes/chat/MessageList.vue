@@ -20,6 +20,7 @@ import { LIVE_CHAT_MAX_LOADED_MESSAGES, parseMessageReference, useChatStore, typ
 import { useToolTraceVisibility } from "@/composables/useToolTraceVisibility";
 import { openSubagentStream, subagentIdFromToolCall } from "@/utils/hermes/subagent-stream";
 import { messageScrollPositionKey, rememberMessageScrollPosition } from "./message-scroll-position";
+import { sessionSupportsSteer } from "@/utils/hermes/session-steer";
 
 const props = withDefaults(defineProps<{
   approvalPortalToBody?: boolean
@@ -33,13 +34,7 @@ const emit = defineEmits<{
 }>()
 
 const chatStore = useChatStore();
-const canSteerQueuedMessages = computed(() => {
-  const session = chatStore.activeSession
-  return !!session
-    && session.source !== 'coding_agent'
-    && !session.codingAgentId
-    && !['claude', 'codex', 'ekko-agent'].includes(session.agent || '')
-})
+const canSteerQueuedMessages = computed(() => sessionSupportsSteer(chatStore.activeSession))
 const { t } = useI18n();
 const { toolTraceVisible } = useToolTraceVisibility();
 const listRef = ref<InstanceType<typeof VirtualMessageList> | null>(null);
@@ -973,12 +968,13 @@ defineExpose({
             </span>
             <span>{{ t('chat.messageQueue') }}</span>
             <NButton
-              v-if="canSteerQueuedMessages"
               quaternary
               size="small"
               class="queue-steer-button"
-              :aria-label="t('chat.steer')"
-              @click.stop="requestSteering(queuedMessages[0])"
+              :disabled="!canSteerQueuedMessages"
+              :title="canSteerQueuedMessages ? t('chat.steer') : t('chat.steerUnavailable')"
+              :aria-label="canSteerQueuedMessages ? t('chat.steer') : t('chat.steerUnavailable')"
+              @click.stop="canSteerQueuedMessages && requestSteering(queuedMessages[0])"
             >
               <template #icon>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

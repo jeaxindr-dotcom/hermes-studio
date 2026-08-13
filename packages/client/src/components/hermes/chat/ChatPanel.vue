@@ -49,7 +49,7 @@ import SessionListItem from "./SessionListItem.vue";
 import OutlinePanel from "./OutlinePanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
-import { buildProjectGroups, buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
+import { buildProjectGroups, buildVisibleSessionCategoryGroups, partitionRecentSessions, projectDropTargetFromKey } from "./session-category-groups";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
 import SettingsCircuitBadge from "@/components/layout/SettingsCircuitBadge.vue";
 import { isStoredSuperAdmin } from "@/api/client";
@@ -1454,7 +1454,7 @@ const contextSession = computed(() =>
 );
 
 const draggedSessionId = ref<string | null>(null);
-const dragOverProjectId = ref<number | null>(null);
+const dragOverDropKey = ref<string | null>(null);
 
 function handleSessionDragStart(event: DragEvent) {
   const target = event.target instanceof HTMLElement
@@ -1469,27 +1469,29 @@ function handleSessionDragStart(event: DragEvent) {
 
 function handleSessionDragEnd() {
   draggedSessionId.value = null;
-  dragOverProjectId.value = null;
+  dragOverDropKey.value = null;
 }
 
-function handleProjectDragOver(categoryId: number) {
-  if (!draggedSessionId.value) return;
-  dragOverProjectId.value = categoryId;
+function handleProjectDragOver(key: string) {
+  if (!draggedSessionId.value || !projectDropTargetFromKey(key)) return;
+  dragOverDropKey.value = key;
 }
 
-function handleProjectDragLeave(event: DragEvent, categoryId: number) {
+function handleProjectDragLeave(event: DragEvent, key: string) {
   const currentTarget = event.currentTarget;
   const relatedTarget = event.relatedTarget;
   if (currentTarget instanceof HTMLElement && relatedTarget instanceof Node && currentTarget.contains(relatedTarget)) return;
-  if (dragOverProjectId.value === categoryId) dragOverProjectId.value = null;
+  if (dragOverDropKey.value === key) dragOverDropKey.value = null;
 }
 
-async function handleProjectDrop(event: DragEvent, categoryId: number) {
+async function handleProjectDrop(event: DragEvent, key: string) {
   event.preventDefault();
   const sessionId = event.dataTransfer?.getData("text/plain") || draggedSessionId.value;
   draggedSessionId.value = null;
-  dragOverProjectId.value = null;
-  if (!sessionId) return;
+  dragOverDropKey.value = null;
+  const target = projectDropTargetFromKey(key);
+  if (!sessionId || !target) return;
+  const categoryId = target.kind === "project" ? target.categoryId : null;
   const session = chatStore.sessions.find((item) => item.id === sessionId);
   if (!session || session.categoryId === categoryId) return;
   try {
@@ -1502,25 +1504,20 @@ async function handleProjectDrop(event: DragEvent, categoryId: number) {
 }
 
 function projectIdFromKey(key: string): number | null {
-  if (!key.startsWith("category-")) return null;
-  const id = Number(key.slice("category-".length));
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
+  const target = projectDropTargetFromKey(key);
+  return target?.kind === "project" ? target.categoryId : null;
 }
 
 function handleProjectDragOverKey(key: string) {
-  const categoryId = projectIdFromKey(key);
-  if (categoryId !== null) handleProjectDragOver(categoryId);
+  handleProjectDragOver(key);
 }
 
 function handleProjectDragLeaveKey(event: DragEvent, key: string) {
-  const categoryId = projectIdFromKey(key);
-  if (categoryId !== null) handleProjectDragLeave(event, categoryId);
+  handleProjectDragLeave(event, key);
 }
 
 async function handleProjectDropKey(event: DragEvent, key: string) {
-  const categoryId = projectIdFromKey(key);
-  if (categoryId !== null) await handleProjectDrop(event, categoryId);
-  else event.preventDefault();
+  await handleProjectDrop(event, key);
 }
 
 const showCategoryContextMenu = ref(false);
@@ -2287,7 +2284,7 @@ async function handleSessionModelCustomSubmit() {
           <template v-for="group in projectGroups" :key="group.key">
             <div
               class="project-group-drop-zone"
-              :class="{ 'drop-target': dragOverProjectId === projectIdFromKey(group.key) }"
+              :class="{ 'drop-target': dragOverDropKey === group.key }"
               @dragover.prevent="handleProjectDragOverKey(group.key)"
               @dragleave="handleProjectDragLeaveKey($event, group.key)"
               @drop="handleProjectDropKey($event, group.key)"
@@ -2359,10 +2356,22 @@ async function handleSessionModelCustomSubmit() {
         </div>
 
         <template v-if="recentSessions.sessions.length > 0">
+          <div
+            class="project-group-drop-zone"
+            :class="{ 'drop-target': dragOverDropKey === 'recent' }"
+            @dragover.prevent="handleProjectDragOverKey('recent')"
+            @dragleave="handleProjectDragLeaveKey($event, 'recent')"
+            @drop="handleProjectDropKey($event, 'recent')"
+          >
           <div class="session-group-header session-group-header--static">
             <span class="session-group-label">{{ recentSessions.label }}</span>
             <span class="session-group-count">{{ recentSessions.sessions.length }}</span>
-            <button class="session-group-config" type="button" :title="t('chat.recentCount')" @click="openRecentCountModal">⚙</button>
+            <button class="session-group-config" type="button" :title="t('chat.recentCount')" :aria-label="t('chat.recentCount')" @click="openRecentCountModal">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.3.7.9 1.2 1.6 1.3H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+              </svg>
+            </button>
           </div>
           <SessionListItem
             v-for="s in recentSessions.sessions"
@@ -2385,6 +2394,7 @@ async function handleSessionModelCustomSubmit() {
             @delete="handleDeleteSession(s.id)"
             @toggle-select="toggleSessionSelection(s)"
           />
+          </div>
         </template>
 
         <template v-if="pinnedSessions.length > 0">
@@ -2419,6 +2429,13 @@ async function handleSessionModelCustomSubmit() {
         </template>
 
         <template v-for="group in categorizedSessions" :key="group.key">
+          <div
+            class="project-group-drop-zone"
+            :class="{ 'drop-target': dragOverDropKey === group.key }"
+            @dragover.prevent="handleProjectDragOverKey(group.key)"
+            @dragleave="handleProjectDragLeaveKey($event, group.key)"
+            @drop="handleProjectDropKey($event, group.key)"
+          >
           <div
             class="session-group-header"
             @click="toggleCategoryGroup(group.key)"
@@ -2465,6 +2482,7 @@ async function handleSessionModelCustomSubmit() {
               @toggle-select="toggleSessionSelection(s)"
             />
           </template>
+          </div>
         </template>
       </div>
       <div v-if="showSessions" class="page-sidebar-bottom">
