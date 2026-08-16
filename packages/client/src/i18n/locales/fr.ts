@@ -304,7 +304,9 @@ export default {
     output: 'Sortie',
     codingAgents: 'Agents de code',
     workspaceRequired: 'Aucun projet associé',
-    workspaceRequiredHint: 'Ouvrez ou créez une discussion Hermes avec un espace de travail pour parcourir et modifier ce projet en sécurité.',
+    workspaceRequiredHint: 'Attachez un dossier ici, ou ouvrez une discussion Hermes qui a déjà un espace de travail.',
+    attachWorkspace: 'Attacher un dossier',
+    workspaceNeedsSavedSession: 'Ouvrez ou enregistrez d’abord une conversation, puis attachez un dossier.',
     returnToChat: 'Choisir dans Discussion',
     workspaceSwitchUnsaved: 'Des fichiers ouverts contiennent des modifications non enregistrées. Les abandonner avant de changer de projet ?',
     assistantTitle: 'Assistant de code',
@@ -752,7 +754,7 @@ export default {
     },
     steer: 'Orienter',
     steerTooltip: 'Envoyer cette consigne à l’exécution en cours au prochain point de reprise',
-    steerUnavailable: 'Disponible pendant une exécution active',
+    steerUnavailable: 'L’orientation n’est disponible que pendant un run Hermes Bridge actif, pas sur Codex ni Claude Code.',
     authorizationMode: {
       tooltip: 'Autorisation des commandes',
       options: {

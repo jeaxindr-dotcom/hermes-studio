@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NTooltip, useDialog, useMessage } from 'naive-ui'
+import { NButton, NModal, NTooltip, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
 import PageSidebarResizeHandle from '@/components/layout/PageSidebarResizeHandle.vue'
 import CodeExplorer from '@/components/hermes/code/CodeExplorer.vue'
 import CodeAssistantDock from '@/components/hermes/code/CodeAssistantDock.vue'
+import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
+import { setSessionWorkspace } from '@/api/hermes/sessions'
 
 import FileEditor from '@/components/hermes/files/FileEditor.vue'
 import TerminalPanel from '@/components/hermes/chat/TerminalPanel.vue'
@@ -227,6 +229,36 @@ async function openRequestedFile() {
   }
 }
 
+const showWorkspaceModal = ref(false)
+const workspacePickerValue = ref('')
+
+function openAttachWorkspace() {
+  const session = activeSession.value
+  if (!session || session.isLocalOnly) {
+    message.warning(t('code.workspaceNeedsSavedSession'))
+    return
+  }
+  workspacePickerValue.value = session.workspace || ''
+  showWorkspaceModal.value = true
+}
+
+async function confirmAttachWorkspace() {
+  const session = activeSession.value
+  const path = workspacePickerValue.value.trim()
+  if (!session || session.isLocalOnly || !path) return false
+  const ok = await setSessionWorkspace(session.id, path)
+  if (!ok) {
+    message.error(t('chat.workspaceSetFailed'))
+    return false
+  }
+  session.workspace = path
+  if (chatStore.activeSession?.id === session.id) chatStore.activeSession.workspace = path
+  message.success(t('chat.workspaceSet'))
+  showWorkspaceModal.value = false
+  await bindWorkspace(true)
+  return true
+}
+
 function openChat() {
   void router.push({ name: 'hermes.chat' })
 }
@@ -380,6 +412,7 @@ onBeforeUnmount(() => {
         </svg>
         <strong>{{ t('code.workspaceRequired') }}</strong>
         <span>{{ t('code.workspaceRequiredHint') }}</span>
+        <NButton size="small" type="primary" @click="openAttachWorkspace">{{ t('code.attachWorkspace') }}</NButton>
         <NButton size="small" secondary @click="openChat">{{ t('code.returnToChat') }}</NButton>
       </div>
     </aside>
@@ -519,6 +552,17 @@ onBeforeUnmount(() => {
       :profile="activeProfile"
       @select-session="selectCodeSession"
     />
+    <NModal
+      v-model:show="showWorkspaceModal"
+      preset="dialog"
+      :title="t('code.attachWorkspace')"
+      :positive-text="t('common.ok')"
+      :negative-text="t('common.cancel')"
+      style="width: 520px"
+      @positive-click="confirmAttachWorkspace"
+    >
+      <FolderPicker v-model="workspacePickerValue" />
+    </NModal>
   </div>
 </template>
 

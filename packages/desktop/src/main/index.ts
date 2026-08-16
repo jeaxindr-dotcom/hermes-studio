@@ -17,7 +17,7 @@ import {
 } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { startWebUiServer, stopWebUiServer, getToken } from './webui-server'
+import { startWebUiServer, stopWebUiServer, getToken, setWebUiQuitting, setWebUiReadyHandler } from './webui-server'
 import { bundledNode, desktopIcon, desktopMacTrayIcon, desktopRuntimeVersion, desktopWindowsTrayIcon, hermesBinExists, hermesBin, runtimeStorageRoot, webuiDir, webUiHome } from './paths'
 import { checkForDesktopUpdates, initAutoUpdater } from './updater'
 import { t } from './desktop-i18n'
@@ -38,6 +38,7 @@ import {
 import { BrowserManager } from './browser/browser-manager'
 import { BrowserBroker } from './browser/browser-broker'
 import type { BrowserBounds } from './browser/browser-types'
+import { scheduleRendererRecovery, shouldReloadRendererAfterGone } from './process-resilience'
 
 const PORT = Number(process.env.HERMES_DESKTOP_PORT) || 8748
 const START_HIDDEN = process.argv.includes('--hidden')
@@ -130,11 +131,13 @@ function showMainWindow() {
 
 function quitApp() {
   isQuitting = true
+  setWebUiQuitting(true)
   app.quit()
 }
 
 async function prepareAppShutdown(): Promise<void> {
   isQuitting = true
+  setWebUiQuitting(true)
   if (!appShutdownPromise) {
     appShutdownPromise = (async () => {
       cancelWindowFade()
@@ -511,6 +514,26 @@ async function createWindow(): Promise<void> {
   mainWindow.on('restore', () => notifyWindowStateChanged(mainWindow))
 
   installSelectionContextMenu(mainWindow)
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[desktop] main renderer gone reason=${details.reason} exitCode=${details.exitCode}`)
+    if (!shouldReloadRendererAfterGone(details)) return
+    const crashedWindow = mainWindow
+    const target = mainRouteUrl() || serverUrl
+    if (isQuitting || !target || !crashedWindow || crashedWindow.isDestroyed()) return
+    scheduleRendererRecovery(() => {
+      if (isQuitting || mainWindow !== crashedWindow || crashedWindow.isDestroyed()) return
+      void crashedWindow.loadURL(target)
+        .then(() => {
+          if (!isQuitting && mainWindow === crashedWindow && !crashedWindow.isDestroyed()) {
+            showWindowWithFade(true)
+          }
+        })
+        .catch(error => {
+          console.warn('[desktop] failed to reload after renderer crash', error)
+        })
+    })
+  })
 
   // External links → system browser
   mainWindow.webContents.setWindowOpenHandler(({ url, frameName }) => {
@@ -1211,6 +1234,15 @@ function runDesktopApp() {
     // default is fine there.
     if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
     installMicrophonePermissionHandler()
+    setWebUiReadyHandler((url) => {
+      serverUrl = url
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        void mainWindow.loadURL(mainRouteUrl() || url).catch(error => {
+          console.warn('[desktop] failed to reload after Web UI restart', error)
+        })
+        showWindowWithFade(true)
+      }
+    })
     createTray()
     await createWindow()
     await initializeDesktopBrowser().catch(error => {

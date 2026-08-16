@@ -5,6 +5,7 @@ import {
   buildRecentSessionCategoryGroup,
   buildVisibleSessionCategoryGroups,
   partitionRecentSessions,
+  projectDropTargetFromKey,
 } from '../../packages/client/src/components/hermes/chat/session-category-groups'
 
 describe('session category groups', () => {
@@ -102,5 +103,13 @@ describe('session category groups', () => {
       'newest-categorized',
       'middle-uncategorized',
     ])
+  })
+
+  it('treats Recent and Sans projet as uncategorized drop targets', () => {
+    expect(projectDropTargetFromKey('category-7')).toEqual({ kind: 'project', categoryId: 7 })
+    expect(projectDropTargetFromKey('recent')).toEqual({ kind: 'uncategorized' })
+    expect(projectDropTargetFromKey('category-none')).toEqual({ kind: 'uncategorized' })
+    expect(projectDropTargetFromKey('pinned')).toBeNull()
+    expect(projectDropTargetFromKey('category-0')).toBeNull()
   })
 })

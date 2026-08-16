@@ -12,6 +12,7 @@ import { deleteSkillBundleApi, fetchSkillBundles, type SkillBundleInfo } from '@
 import { NButton, NTooltip, NModal, NPopover, NSlider, NDropdown, useDialog, useMessage, type DropdownOption } from 'naive-ui'
 import { computed, ref, nextTick, onMounted, onUnmounted, watch, h } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { sessionSupportsSteer } from '@/utils/hermes/session-steer'
 import { useToolTraceVisibility } from '@/composables/useToolTraceVisibility'
 import { extractClipboardFiles } from '@/utils/clipboard-files'
 import VoiceDialogueControls from './VoiceDialogueControls.vue'
@@ -1140,6 +1141,10 @@ function handleDrop(e: DragEvent) {
 }
 
 function activateSteeringMode() {
+  if (!sessionSupportsSteer(chatStore.activeSession)) {
+    message.warning(t('chat.steerUnavailable'))
+    return
+  }
   steeringMode.value = true
   nextTick(() => textareaRef.value?.focus())
 }
@@ -1152,6 +1157,11 @@ function handleSend() {
   const text = inputText.value.trim()
   if (!text && attachments.value.length === 0) return
   if (steeringMode.value && text && attachments.value.length === 0) {
+    if (!sessionSupportsSteer(chatStore.activeSession)) {
+      message.warning(t('chat.steerUnavailable'))
+      steeringMode.value = false
+      return
+    }
     // The server handles /steer before normal queueing, forwarding the text to
     // the active bridge run at its next safe checkpoint.
     chatStore.sendSteerMessage(text)

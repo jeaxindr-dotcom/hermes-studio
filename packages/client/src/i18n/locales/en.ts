@@ -292,7 +292,9 @@ export default {
     output: 'Output',
     codingAgents: 'Coding agents',
     workspaceRequired: 'No project workspace',
-    workspaceRequiredHint: 'Open or create a Hermes chat with a workspace to browse and edit that project safely.',
+    workspaceRequiredHint: 'Attach a folder here, or open a Hermes chat that already has a workspace.',
+    attachWorkspace: 'Attach folder',
+    workspaceNeedsSavedSession: 'Save or open a conversation first, then attach a folder.',
     returnToChat: 'Choose in Chat',
     workspaceSwitchUnsaved: 'Open files contain unsaved changes. Discard them before switching projects?',
     assistantTitle: 'Code assistant',
@@ -791,7 +793,7 @@ export default {
     },
     steer: 'Steer',
     steerTooltip: 'Send this instruction to the active run at its next safe checkpoint',
-    steerUnavailable: 'Available while a run is active',
+    steerUnavailable: 'Steering is only available during an active Hermes Bridge run, not on Codex or Claude Code.',
     authorizationMode: {
       tooltip: 'Command authorization',
       options: {

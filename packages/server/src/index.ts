@@ -51,6 +51,7 @@ import {
   migratePersistedPiRuntimeMcpConfigs,
   restorePersistedPiProxyTargets,
 } from './services/coding-agents'
+import { shouldExitOnUncaughtException } from './process-resilience'
 
 // Injected by esbuild at build time; fallback to reading package.json in dev mode
 declare const __APP_VERSION__: string
@@ -63,7 +64,7 @@ process.on('uncaughtException', (err) => {
   console.error('FATAL: Uncaught exception')
   console.error(err)
   logger.fatal(err, 'Uncaught exception')
-  process.exit(1)
+  if (shouldExitOnUncaughtException(err)) process.exit(1)
 })
 
 process.on('unhandledRejection', (reason) => {

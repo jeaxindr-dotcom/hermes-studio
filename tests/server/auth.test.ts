@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { join } from 'path'
+import { join, resolve } from 'path'
 
 type FsMocks = {
   readFile: ReturnType<typeof vi.fn>
@@ -12,17 +12,18 @@ async function loadAuth(overrides: Partial<FsMocks> & { home?: string } = {}) {
   const writeFile = overrides.writeFile ?? vi.fn()
   const mkdir = overrides.mkdir ?? vi.fn()
   const home = overrides.home ?? '/tmp/hermes-home'
+  const appHome = resolve(home, '.hermes-web-ui')
 
   vi.resetModules()
+  process.env.HERMES_WEB_UI_HOME = appHome
   vi.doMock('fs/promises', () => ({ readFile, writeFile, mkdir }))
-  vi.doMock('os', () => ({ homedir: () => home }))
 
   const mod = await import('../../packages/server/src/services/auth')
   return {
     ...mod,
     mocks: { readFile, writeFile, mkdir },
-    appHome: join(home, '.hermes-web-ui'),
-    tokenFile: join(home, '.hermes-web-ui', '.token'),
+    appHome,
+    tokenFile: join(appHome, '.token'),
   }
 }
 
@@ -42,6 +43,7 @@ describe('Auth Service', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv }
+    delete process.env.AUTH_TOKEN
     vi.clearAllMocks()
   })
 

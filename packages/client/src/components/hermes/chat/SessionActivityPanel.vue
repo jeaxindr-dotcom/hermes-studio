@@ -45,7 +45,7 @@ const streams = computed(() =>
 const runningAgents = computed(() => streams.value.filter(stream => stream.status === 'running').length)
 const completedTasks = computed(() => todoSnapshot.value?.summary.completed || 0)
 const totalTasks = computed(() => todoSnapshot.value?.summary.total || 0)
-const visibleTasks = computed(() => todoSnapshot.value?.items.slice(0, 3) || [])
+const visibleTasks = computed(() => todoSnapshot.value?.items || [])
 const taskProgress = computed(() =>
   totalTasks.value > 0 ? Math.round((completedTasks.value / totalTasks.value) * 100) : 0,
 )

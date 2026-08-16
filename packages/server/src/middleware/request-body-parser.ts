@@ -9,9 +9,9 @@ export function createRequestBodyParser() {
   return bodyParser({
     encoding: 'utf-8',
     enableTypes: ['json', 'form', 'text'],
-    jsonLimit: '20mb',
-    formLimit: '20mb',
-    textLimit: '20mb',
+    jsonLimit: '100mb',
+    formLimit: '100mb',
+    textLimit: '100mb',
     parsedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
   })
 }

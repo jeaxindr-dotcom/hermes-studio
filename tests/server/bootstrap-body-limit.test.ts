@@ -5,8 +5,8 @@ describe('bootstrap body parser limits', () => {
   it('allows MiMo voice-clone JSON payloads advertised by the UI/docs', () => {
     const source = readFileSync('packages/server/src/middleware/request-body-parser.ts', 'utf8')
 
-    expect(source).toContain("jsonLimit: '20mb'")
-    expect(source).toContain("formLimit: '20mb'")
+    expect(source).toContain("jsonLimit: '100mb'")
+    expect(source).toContain("formLimit: '100mb'")
   })
 
   it('parses DELETE request bodies for file operations', () => {

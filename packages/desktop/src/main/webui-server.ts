@@ -6,6 +6,7 @@ import { dirname, delimiter, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { promisify } from 'node:util'
 import { app } from 'electron'
+import { mergeNodeHeapOptions, shouldRestartWebUiAfterExit } from './process-resilience'
 import {
   bundledAgentBrowserHome,
   bundledGit,
@@ -38,6 +39,18 @@ const execFileAsync = promisify(execFile)
 let serverProc: ChildProcess | null = null
 let cachedToken: string | null = null
 let currentServerPort = DEFAULT_PORT
+let webUiQuitting = false
+let webUiRestartCount = 0
+let webUiRestartTimer: ReturnType<typeof setTimeout> | null = null
+let onWebUiReady: ((url: string) => void) | null = null
+
+export function setWebUiQuitting(value: boolean): void {
+  webUiQuitting = value
+}
+
+export function setWebUiReadyHandler(handler: ((url: string) => void) | null): void {
+  onWebUiReady = handler
+}
 
 function posixDescendantPids(rootPid: number): number[] {
   try {
@@ -446,6 +459,7 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
     HERMES_WEBUI_STATE_DIR: home,
     AUTH_TOKEN: token,
     PORT: String(port),
+    NODE_OPTIONS: mergeNodeHeapOptions(process.env.NODE_OPTIONS),
     // Prepend bundled Python's bin to PATH so any incidental `python` resolution lands on ours
     PATH: runtimePath,
   }
@@ -475,6 +489,7 @@ async function launchWebUiServer(webUiDirectory: string, entry: string, env: Nod
 
   const launchedProc = serverProc
   const bridgeStartup = createAgentBridgeStartupTracker()
+  let accepted = false
 
   launchedProc.stdout?.on('data', (chunk: Buffer) => {
     bridgeStartup.observe(chunk)
@@ -497,9 +512,26 @@ async function launchWebUiServer(webUiDirectory: string, entry: string, env: Nod
   launchedProc.on('exit', (code, signal) => {
     console.error(`[webui] server exited code=${code} signal=${signal}`)
     if (serverProc === launchedProc) serverProc = null
-    if (!app.isReady() || code !== 0) {
-      // Best-effort: if server dies abnormally during startup, surface to user
-    }
+    if (!accepted || !app.isReady()) return
+    const decision = shouldRestartWebUiAfterExit({
+      isQuitting: webUiQuitting,
+      exitCode: code,
+      signal,
+      restartCount: webUiRestartCount,
+    })
+    if (!decision.restart) return
+    webUiRestartCount += 1
+    if (webUiRestartTimer) clearTimeout(webUiRestartTimer)
+    webUiRestartTimer = setTimeout(() => {
+      void startWebUiServer(currentServerPort)
+        .then(url => {
+          webUiRestartCount = 0
+          onWebUiReady?.(url)
+        })
+        .catch(err => {
+          console.error(`[webui] automatic restart failed: ${err instanceof Error ? err.message : String(err)}`)
+        })
+    }, decision.delayMs)
   })
 
   const timeoutMs = readyTimeoutMs()
@@ -516,6 +548,8 @@ async function launchWebUiServer(webUiDirectory: string, entry: string, env: Nod
     if (serverProc === launchedProc) serverProc = null
     throw err
   }
+  accepted = true
+  webUiRestartCount = 0
   const fullStartupTimeoutMs = fullStartupWaitMs()
   if (fullStartupTimeoutMs > 0) {
     await Promise.race([

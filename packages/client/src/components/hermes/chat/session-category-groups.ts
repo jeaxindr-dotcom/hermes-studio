@@ -41,6 +41,17 @@ export interface RecentSessionPartition<T> {
   remaining: T[];
 }
 
+export type ProjectDropTarget =
+  | { kind: 'project'; categoryId: number }
+  | { kind: 'uncategorized' }
+
+export function projectDropTargetFromKey(key: string): ProjectDropTarget | null {
+  if (key === 'recent' || key === 'category-none') return { kind: 'uncategorized' }
+  if (!key.startsWith('category-')) return null
+  const id = Number(key.slice('category-'.length))
+  return Number.isSafeInteger(id) && id > 0 ? { kind: 'project', categoryId: id } : null
+}
+
 export function buildVisibleSessionCategoryGroups<T extends SessionCategoryAssignment>(
   categories: readonly SessionCategoryLike[],
   sessions: readonly T[],

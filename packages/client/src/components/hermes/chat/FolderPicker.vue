@@ -330,7 +330,11 @@ const flatNodes = computed<FlatNode[]>(() => {
         @click="selectBase"
         @contextmenu="showContextMenu($event, null)"
       >
-        <span class="folder-icon">📂</span>
+        <span class="folder-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h4.2l1.6 1.6H18.5A2.5 2.5 0 0 1 21 10.1V17.5A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" />
+          </svg>
+        </span>
         <span class="folder-name">{{ basePath || '/' }}</span>
       </div>
 
@@ -345,10 +349,19 @@ const flatNodes = computed<FlatNode[]>(() => {
         @contextmenu="showContextMenu($event, node.folder)"
       >
         <span class="folder-expand" @click.stop="toggleExpand(node.folder)">
-          <template v-if="node.isLoading">⏳</template>
-          <template v-else>{{ node.isExpanded ? '▼' : '▶' }}</template>
+          <svg v-if="node.isLoading" class="folder-spinner" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-6.2-8.6" />
+          </svg>
+          <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polyline v-if="node.isExpanded" points="6 9 12 15 18 9" />
+            <polyline v-else points="9 6 15 12 9 18" />
+          </svg>
         </span>
-        <span class="folder-icon">📁</span>
+        <span class="folder-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h5l2 2H18.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" />
+          </svg>
+        </span>
         <span class="folder-name">{{ node.folder.name }}</span>
       </div>
 
