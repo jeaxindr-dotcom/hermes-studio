@@ -514,6 +514,12 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (/^\/api\/hermes\/sessions\/[^/]+\/activity$/.test(pathname) && request.method() === 'GET') {
+      const sessionId = decodeURIComponent(pathname.split('/').at(-2) || '')
+      await route.fulfill(jsonResponse({ sessionId, todo: null, streams: [] }))
+      return
+    }
+
     if (pathname === '/api/hermes/files/list') {
       await route.fulfill(jsonResponse({ entries: [], path: '' }))
       return
