@@ -173,6 +173,56 @@ describe('group chat store streaming merge', () => {
     )
   })
 
+  it('keeps persisted Tools inside the live Agent run when transport sender ids differ', async () => {
+    const store = await createJoinedStore()
+    const { groupAgentRunMessages } = await import('@/stores/hermes/group-chat')
+
+    emitSocket('message_stream_start', assistantMessage({
+      id: 'run-owned_part_0',
+      senderId: 'transport-socket-id',
+      senderAgentRecordId: 'agent-record-1',
+      run_id: 'run-owned',
+      finish_reason: 'streaming',
+    }))
+    emitSocket('message_reasoning_delta', {
+      roomId: 'room-1',
+      id: 'run-owned_part_0',
+      delta: 'Inspecting.',
+    })
+    emitSocket('message', assistantMessage({
+      id: 'run-owned_part_0_toolresult_call-owned',
+      senderId: 'agent-stable-id',
+      senderAgentRecordId: 'agent-record-1',
+      timestamp: 2,
+      run_id: 'run-owned',
+      role: 'tool',
+      tool_call_id: 'call-owned',
+      tool_name: 'read_file',
+      content: 'result',
+    }))
+    emitSocket('message', assistantMessage({
+      id: 'run-owned_part_1',
+      senderId: 'agent-stable-id',
+      senderAgentRecordId: 'agent-record-1',
+      timestamp: 3,
+      run_id: 'run-owned',
+      content: 'Finished.',
+    }))
+
+    const grouped = groupAgentRunMessages(store.sortedMessages)
+    expect(grouped).toHaveLength(1)
+    expect(grouped[0]).toMatchObject({
+      role: 'agent_run',
+      run_id: 'run-owned',
+      senderAgentRecordId: 'agent-record-1',
+    })
+    expect(grouped[0].runItems).toEqual([
+      expect.objectContaining({ id: 'run-owned_part_0', reasoning: 'Inspecting.' }),
+      expect.objectContaining({ role: 'tool', toolCallId: 'call-owned' }),
+      expect.objectContaining({ id: 'run-owned_part_1', content: 'Finished.' }),
+    ])
+  })
+
   it('does not revive an older orphaned Tool call when the same agent starts a newer run', async () => {
     const store = await createJoinedStore([
       assistantMessage({
@@ -224,6 +274,51 @@ describe('group chat store streaming merge', () => {
       reasoning_content: 'thinking...',
       isStreaming: false,
     })
+  })
+
+  it('batches rapid content and reasoning deltas without replacing the live message', async () => {
+    vi.useFakeTimers()
+    const store = await createJoinedStore()
+
+    emitSocket('message_stream_start', assistantMessage({ id: 'msg-batched' }))
+    const liveMessage = store.messages[0]
+    const renderedMessage = store.sortedMessages[0]
+    emitSocket('message_stream_delta', { roomId: 'room-1', id: 'msg-batched', delta: 'hello' })
+    emitSocket('message_stream_delta', { roomId: 'room-1', id: 'msg-batched', delta: ' world' })
+    emitSocket('message_reasoning_delta', { roomId: 'room-1', id: 'msg-batched', delta: 'think' })
+    emitSocket('message_reasoning_delta', { roomId: 'room-1', id: 'msg-batched', delta: ' twice' })
+
+    expect(store.messages[0]).toBe(liveMessage)
+    expect(store.messages[0].content).toBe('')
+    expect(store.messages[0].reasoning).toBeUndefined()
+
+    await vi.advanceTimersByTimeAsync(49)
+    expect(store.messages[0].content).toBe('')
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(store.messages[0]).toBe(liveMessage)
+    expect(store.sortedMessages[0]).toBe(renderedMessage)
+    expect(store.messages[0]).toMatchObject({
+      content: 'hello world',
+      reasoning: 'think twice',
+      reasoning_content: 'think twice',
+      isStreaming: true,
+    })
+  })
+
+  it('flushes a queued delta immediately when the stream ends', async () => {
+    vi.useFakeTimers()
+    const store = await createJoinedStore()
+
+    emitSocket('message_stream_start', assistantMessage({ id: 'msg-ending' }))
+    emitSocket('message_stream_delta', { roomId: 'room-1', id: 'msg-ending', delta: 'complete' })
+    emitSocket('message_stream_end', { roomId: 'room-1', id: 'msg-ending' })
+
+    expect(store.messages[0]).toMatchObject({
+      content: 'complete',
+      isStreaming: false,
+    })
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('preserves streamed content when the final message payload is blank', async () => {
@@ -703,12 +798,13 @@ describe('group chat store streaming merge', () => {
     expect(store.contextStatus).toEqual(expect.objectContaining({ agentName: 'Worker', status: 'replying' }))
   })
 
-  it('loads group history in 150-message pages and stops at the 600-message display cap', async () => {
+  it('loads group history to the authoritative 500-message display cap', async () => {
     const store = await createJoinedStore()
     store.loadedMessageCount = 450
-    store.totalMessages = 700
+    store.totalMessages = 500
     store.hasMoreBefore = true
-    const olderMessages = Array.from({ length: 150 }, (_, index) =>
+    store.historyTruncated = true
+    const olderMessages = Array.from({ length: 50 }, (_, index) =>
       assistantMessage({ id: `older-${index}`, timestamp: index + 1, content: `older ${index}` }),
     )
     groupChatApiMock.getRoomDetail.mockResolvedValueOnce({
@@ -716,22 +812,101 @@ describe('group chat store streaming merge', () => {
       messages: olderMessages,
       agents: [],
       members: [],
-      total: 700,
+      total: 500,
       offset: 450,
-      limit: 150,
-      hasMore: true,
+      limit: 50,
+      hasMore: false,
+      historyTruncated: true,
     })
 
     await expect(store.loadOlderMessages()).resolves.toBe(true)
 
-    expect(groupChatApiMock.getRoomDetail).toHaveBeenCalledWith('room-1', { offset: 450, limit: 150 })
-    expect(store.loadedMessageCount).toBe(600)
-    expect(store.hasMoreBefore).toBe(true)
+    expect(groupChatApiMock.getRoomDetail).toHaveBeenCalledWith('room-1', { offset: 450, limit: 50 })
+    expect(store.loadedMessageCount).toBe(500)
+    expect(store.hasMoreBefore).toBe(false)
     expect(store.hasReachedMessageDisplayLimit).toBe(true)
 
     groupChatApiMock.getRoomDetail.mockClear()
     await expect(store.loadOlderMessages()).resolves.toBe(false)
     expect(groupChatApiMock.getRoomDetail).not.toHaveBeenCalled()
+  })
+
+  it('shows complete history after the 501st persisted realtime message', async () => {
+    const store = await createJoinedStore()
+    store.loadedMessageCount = 500
+    store.totalMessages = 500
+    store.historyTruncated = false
+
+    emitSocket('message', assistantMessage({
+      id: 'persisted-501',
+      timestamp: 501,
+      content: 'new persisted message',
+    }))
+
+    expect(store.loadedMessageCount).toBe(501)
+    expect(store.totalMessages).toBe(501)
+    expect(store.historyTruncated).toBe(true)
+    expect(store.hasReachedMessageDisplayLimit).toBe(true)
+  })
+
+  it('does not open complete history at or below 500 persisted messages', async () => {
+    const existing = assistantMessage({
+      id: 'persisted-500',
+      timestamp: 500,
+      content: 'existing persisted message',
+    })
+    const store = await createJoinedStore([existing])
+    store.loadedMessageCount = 499
+    store.totalMessages = 499
+    store.historyTruncated = false
+
+    emitSocket('message', existing)
+    expect(store.loadedMessageCount).toBe(499)
+    expect(store.totalMessages).toBe(499)
+    expect(store.historyTruncated).toBe(false)
+
+    emitSocket('message', assistantMessage({
+      id: 'new-persisted-500',
+      timestamp: 501,
+      content: 'the 500th persisted message',
+    }))
+    expect(store.loadedMessageCount).toBe(500)
+    expect(store.totalMessages).toBe(500)
+    expect(store.historyTruncated).toBe(false)
+    expect(store.hasReachedMessageDisplayLimit).toBe(false)
+  })
+
+  it('counts a streaming message once and opens complete history only when it persists', async () => {
+    const store = await createJoinedStore()
+    store.loadedMessageCount = 500
+    store.totalMessages = 500
+    store.historyTruncated = false
+    const streamed = assistantMessage({
+      id: 'streamed-501',
+      timestamp: 501,
+      content: '',
+      finish_reason: 'streaming',
+    })
+
+    emitSocket('message_stream_start', streamed)
+    expect(store.loadedMessageCount).toBe(501)
+    expect(store.totalMessages).toBe(501)
+    expect(store.historyTruncated).toBe(false)
+
+    const persisted = assistantMessage({
+      id: 'streamed-501',
+      timestamp: 501,
+      content: 'persisted final content',
+    })
+    emitSocket('message', persisted)
+    expect(store.loadedMessageCount).toBe(501)
+    expect(store.totalMessages).toBe(501)
+    expect(store.historyTruncated).toBe(true)
+    expect(store.hasReachedMessageDisplayLimit).toBe(true)
+
+    emitSocket('message', persisted)
+    expect(store.loadedMessageCount).toBe(501)
+    expect(store.totalMessages).toBe(501)
   })
 
   it('ignores a stale reconnect join ack after the user switches rooms', async () => {

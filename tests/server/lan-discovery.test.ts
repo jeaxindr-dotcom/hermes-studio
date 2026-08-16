@@ -5,6 +5,8 @@ import {
   HERMES_DISCOVERY_PORT,
   discoveryPortForHttpPort,
   getDiscoveryHttpPorts,
+  getLanBackendUrl,
+  getLanBackendUrlForRequest,
   getLanEndpointKind,
   isPrivateOrLoopbackIPv4,
   resetLanDiscoveryState,
@@ -62,6 +64,38 @@ describe('LAN discovery', () => {
     expect(getLanEndpointKind(8648)).toBe('web')
     expect(getLanEndpointKind(8748)).toBe('desktop')
     expect(getLanEndpointKind(19001)).toBe('custom')
+  })
+
+  it('builds an App backend URL on a private local interface', () => {
+    const url = new URL(getLanBackendUrl('::ffff:127.0.0.1', 19004))
+
+    expect(url.protocol).toBe('http:')
+    expect(url.port).toBe('19004')
+    expect(isPrivateOrLoopbackIPv4(url.hostname)).toBe(true)
+  })
+
+  it('uses the externally requested host instead of a Docker container interface', () => {
+    expect(getLanBackendUrlForRequest(
+      '172.19.0.1',
+      'http://192.168.10.102:6060',
+      6060,
+      '',
+    )).toBe('http://192.168.10.102:6060')
+  })
+
+  it('supports an explicit Docker LAN advertise URL and ignores localhost request origins', () => {
+    expect(getLanBackendUrlForRequest(
+      '172.19.0.1',
+      'http://localhost:6060',
+      6060,
+      'http://192.168.10.102:16060',
+    )).toBe('http://192.168.10.102:16060')
+    expect(getLanBackendUrlForRequest(
+      '192.168.10.20',
+      'http://localhost:6060',
+      6060,
+      '',
+    )).not.toBe('http://localhost:6060')
   })
 
   it('limits discovery responses to local/private IPv4 senders', () => {
@@ -155,9 +189,10 @@ describe('LAN discovery', () => {
     expect(result.devices).toEqual([])
   })
 
-  it('registers device request routes before auth and management routes behind super admin auth', () => {
+  it('registers device request routes before auth and device management routes behind super admin auth', () => {
     const source = readFileSync('packages/server/src/routes/index.ts', 'utf8')
     const deviceRoutesSource = readFileSync('packages/server/src/routes/devices.ts', 'utf8')
+    const mcuDeviceRoutesSource = readFileSync('packages/server/src/routes/mcu-devices.ts', 'utf8')
     const bootstrapSource = readFileSync('packages/server/src/index.ts', 'utf8')
 
     const authIndex = source.indexOf('authMiddleware.forEach')
@@ -177,6 +212,7 @@ describe('LAN discovery', () => {
     expect(deviceRoutesSource).toContain("deviceRoutes.get('/api/devices/peer-connections'")
     expect(deviceRoutesSource).toContain("deviceRoutes.post('/api/devices/:id/connect'")
     expect(deviceRoutesSource).toContain("deviceRoutes.get('/api/devices/peer-connections/:connectionId/terminals'")
+    expect(mcuDeviceRoutesSource).not.toContain('requireSuperAdmin')
     expect(bootstrapSource).toContain('getLanPeerSocketPath()')
     expect(publicDeviceIndex).toBeLessThan(authIndex)
     expect(deviceIndex).toBeGreaterThan(authIndex)
